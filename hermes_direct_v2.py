@@ -23,6 +23,7 @@ from typing import Optional, Tuple
 import hermes_window_ops as window_ops
 import hermes_chat_ops as chat_ops
 import hermes_session_verify as session_verify
+import hermes_config
 
 
 # Configure logging
@@ -59,13 +60,6 @@ def send_message_to_agent(
     """
     logger = logging.getLogger(__name__)
     
-    # Known workspace hashes (update as needed)
-    workspace_hashes = [
-        'fc7deee2819a0e3e3f792481dedcbc98',
-        '68569d2de19d99c3fa1fe1eceaa8b90c',
-        '8748b265d5d0df6fdc9d9cd506a6807f',  # ARGUS0.QuestMaster
-    ]
-    
     # Step 1: Find window
     try:
         logger.info(f"Finding window for agent: {agent_pattern}")
@@ -78,7 +72,7 @@ def send_message_to_agent(
     # Step 2: Get initial request count (for verification)
     count_before = None
     if verify:
-        count_before = session_verify.get_session_request_count(agent_pattern, workspace_hashes)
+        count_before = session_verify.get_session_request_count(agent_pattern)
         if count_before is None:
             logger.warning(f"Could not find session for verification - continuing without it")
             verify = False
@@ -128,7 +122,6 @@ def send_message_to_agent(
         if session_verify.verify_message_delivery(
             agent_pattern,
             count_before,
-            workspace_hashes,
             timeout_sec=timeout_sec
         ):
             logger.info(f"✓ Message verified delivered to {agent_pattern}")

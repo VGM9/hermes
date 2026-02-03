@@ -4,7 +4,10 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pywinauto.uia_element_info import UIAElementInfo
 
 logger = logging.getLogger(__name__)
 
@@ -19,86 +22,72 @@ class SessionVerificationError(Exception):
     pass
 
 
-def get_appdata_sessions_dir(workspace_hashes: list[str]) -> Optional[list[Path]]:
-    """Get list of valid ChatSessions directories from AppData.
+def get_appdata_sessions_dirs() -> list[Path]:
+    """Get list of all ChatSessions directories from AppData.
     
-    Args:
-        workspace_hashes: List of workspace hash strings to check
-        
+    Uses hermes_session_discovery which queries VSCode via qopilot when available,
+    falls back to AppData scanning only if necessary.
+    
     Returns:
-        List of valid Path objects to session directories, or empty list if none found
+        List of Path objects to session directories, empty list if none found
+        
+    Note:
+        The actual discovery logic is in hermes_session_discovery module.
+        This function is kept for backward compatibility.
     """
-    appdata = Path.home() / 'AppData' / 'Roaming' / 'Code - Insiders' / 'User' / 'workspaceStorage'
+    import hermes_session_discovery
     
-    if not appdata.exists():
-        logger.debug(f"AppData not found: {appdata}")
-        return []
+    sessions = hermes_session_discovery.discover_chat_sessions_via_qopilot()
     
-    valid_dirs = []
-    for hash_str in workspace_hashes:
-        sessions_dir = appdata / hash_str / 'chatSessions'
-        if sessions_dir.exists():
-            logger.debug(f"Found sessions directory: {sessions_dir}")
-            valid_dirs.append(sessions_dir)
-    
-    return valid_dirs
+    # Convert to Path objects for compatibility
+    return [Path(s['workspace_path']) / 'User' / 'workspaceStorage' / s['workspace_hash'] / 'chatSessions' 
+            for s in sessions]
 
 
-def find_session_file(
-    agent_pattern: str,
-    workspace_hashes: list[str]
-) -> Optional[Path]:
+def find_session_file(agent_pattern: str) -> Optional[Path]:
     """Find session JSON file matching agent pattern.
+    
+    Uses declarative session discovery (qopilot VSCode API when available).
     
     Args:
         agent_pattern: Pattern to match in customTitle
-        workspace_hashes: List of workspace hashes to search
         
     Returns:
         Path to session file, or None if not found
     """
-    session_dirs = get_appdata_sessions_dir(workspace_hashes)
+    import hermes_session_discovery
     
-    for sessions_dir in session_dirs:
-        try:
-            for json_file in sessions_dir.glob('*.jsonl'):
-                # Try reading as JSONL (one JSON object per line)
-                last_line = None
-                try:
-                    with open(json_file, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            last_line = line
-                    
-                    if last_line:
-                        data = json.loads(last_line)
-                        title = data.get('v', {}).get('customTitle', '')
-                        if agent_pattern.lower() in title.lower():
-                            logger.info(f"Found session file: {json_file.name}")
-                            return json_file
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    logger.debug(f"Failed to parse {json_file}: {e}")
-                    continue
-        except Exception as e:
-            logger.warning(f"Error scanning {sessions_dir}: {e}")
-            continue
+    session = hermes_session_discovery.find_session_for_agent(agent_pattern)
+    if session and 'session_file_path' in session:
+        session_path = Path(session['session_file_path'])
+        if session_path.exists():
+            logger.info(f"Found session file: {session_path.name}")
+            return session_path
     
     return None
 
 
-def get_session_request_count(
-    agent_pattern: str,
-    workspace_hashes: list[str]
-) -> Optional[int]:
+def get_session_request_count(agent_pattern: str) -> Optional[int]:
     """Get current request count from session for verification.
+    
+    Uses declarative discovery via qopilot when available.
     
     Args:
         agent_pattern: Agent name/pattern to find
-        workspace_hashes: List of workspace hashes to check
         
     Returns:
         Request count, or None if session not found or parse fails
     """
-    session_file = find_session_file(agent_pattern, workspace_hashes)
+    import hermes_session_discovery
+    
+    # Try declarative discovery first (via qopilot if available)
+    count = hermes_session_discovery.get_session_request_count_declarative(agent_pattern)
+    if count is not None:
+        logger.info(f"Session request count: {count}")
+        return count
+    
+    # Fallback to reading file directly if discovery returns None
+    session_file = find_session_file(agent_pattern)
     if not session_file:
         logger.debug(f"Session file not found for {agent_pattern}")
         return None
@@ -127,7 +116,6 @@ def get_session_request_count(
 def verify_message_delivery(
     agent_pattern: str,
     count_before: int,
-    workspace_hashes: list[str],
     timeout_sec: float = 5.0,
     check_interval_sec: float = 0.5
 ) -> bool:
@@ -136,7 +124,6 @@ def verify_message_delivery(
     Args:
         agent_pattern: Agent to check
         count_before: Request count before sending
-        workspace_hashes: List of workspace hashes to check
         timeout_sec: Maximum time to wait (default: 5.0s)
         check_interval_sec: Interval between checks (default: 0.5s)
         
@@ -147,7 +134,7 @@ def verify_message_delivery(
     start = time.time()
     
     while time.time() - start < timeout_sec:
-        count_after = get_session_request_count(agent_pattern, workspace_hashes)
+        count_after = get_session_request_count(agent_pattern)
         
         if count_after and count_after > count_before:
             logger.info(f"✓ Verified: request count {count_before} -> {count_after}")
