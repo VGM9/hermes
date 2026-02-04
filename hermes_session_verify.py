@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, List, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pywinauto.uia_element_info import UIAElementInfo
@@ -144,3 +144,116 @@ def verify_message_delivery(
     
     logger.warning(f"Verification timeout ({timeout_sec}s) - message may not have delivered")
     return False
+
+
+def get_sessions_in_workspace(workspace_hash: str) -> List[Dict[str, str]]:
+    """List all chat sessions in a specific workspace.
+    
+    Args:
+        workspace_hash: Workspace hash (directory name in workspaceStorage)
+        
+    Returns:
+        List of dicts with session info: session_id, folder path, etc.
+        Empty list if workspace not found or no sessions.
+    """
+    import hermes_config
+    
+    appdata_path = hermes_config.get_appdata_path()
+    workspace_dir = appdata_path / workspace_hash / 'chatEditingSessions'
+    
+    sessions = []
+    
+    if not workspace_dir.exists():
+        logger.debug(f"Workspace directory not found: {workspace_dir}")
+        return []
+    
+    try:
+        # List all session directories
+        for session_dir in workspace_dir.iterdir():
+            if not session_dir.is_dir():
+                continue
+            
+            session_id = session_dir.name
+            state_file = session_dir / 'state.json'
+            
+            # Try to read session state to get metadata
+            title = None
+            try:
+                if state_file.exists():
+                    with open(state_file, 'r', encoding='utf-8') as f:
+                        state = json.load(f)
+                        # State file structure may have title/metadata
+                        title = state.get('title', 'Unknown')
+            except Exception as e:
+                logger.debug(f"Cannot read state for {session_id}: {e}")
+            
+            sessions.append({
+                'session_id': session_id,
+                'workspace_hash': workspace_hash,
+                'path': str(session_dir),
+                'title': title or 'Untitled Session'
+            })
+            
+            logger.debug(f"Found session: {session_id}")
+        
+        logger.info(f"Found {len(sessions)} session(s) in workspace {workspace_hash}")
+        return sessions
+    
+    except Exception as e:
+        logger.error(f"Error listing sessions in {workspace_hash}: {e}")
+        return []
+
+
+def get_current_window_sessions() -> List[Dict[str, str]]:
+    """Get list of sessions in the currently focused VSCode window.
+    
+    Returns:
+        List of session dicts for the focused window's workspace,
+        or empty list if cannot determine focused window/workspace.
+        
+    Note:
+        Returns sessions in the focused window's workspace if detectable.
+        Uses window title heuristics to determine workspace.
+    """
+    import hermes_window_ops
+    import hermes_config
+    import hashlib
+    
+    # Get focused window
+    focused = hermes_window_ops.get_focused_vscode_window()
+    if not focused:
+        logger.warning("No focused VSCode window found")
+        return []
+    
+    window_title = focused['title']
+    logger.info(f"Current window: {window_title[:70]}")
+    
+    # Try to extract workspace from title
+    workspace_path = hermes_window_ops.get_window_workspace_path(window_title)
+    if not workspace_path:
+        logger.debug("Cannot extract workspace path from window title")
+        # Try to find ALL sessions (less useful, but something)
+        try:
+            appdata = hermes_config.get_appdata_path()
+            all_workspaces = []
+            for ws_dir in appdata.iterdir():
+                if ws_dir.is_dir():
+                    sessions = get_sessions_in_workspace(ws_dir.name)
+                    all_workspaces.extend(sessions)
+            return all_workspaces
+        except Exception as e:
+            logger.error(f"Cannot enumerate workspaces: {e}")
+            return []
+    
+    # Compute workspace hash
+    try:
+        hash_input = str(workspace_path).encode('utf-8')
+        workspace_hash = hashlib.sha256(hash_input).hexdigest()[:32]
+        logger.debug(f"Computed workspace hash: {workspace_hash}")
+        
+        # Get sessions in this workspace
+        return get_sessions_in_workspace(workspace_hash)
+    
+    except Exception as e:
+        logger.error(f"Error computing workspace hash: {e}")
+        return []

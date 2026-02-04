@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import Optional, Tuple, List, Dict, TYPE_CHECKING
 from pathlib import Path
 from pywinauto import Application, findwindows
 
@@ -115,3 +115,125 @@ def focus_window(window: "UIAElementInfo", delay_sec: float = 0.3) -> None:
     except Exception as e:
         logger.error(f"Failed to focus window: {e}")
         raise
+
+
+def get_focused_vscode_window() -> Optional[dict]:
+    """Get the currently focused VS Code window.
+    
+    Returns:
+        Dict with 'window', 'title', 'handle' keys, or None if no VSCode window 
+        has focus.
+        
+    Note:
+        Returns None if focused window is not a VS Code window.
+        Use find_vscode_windows() if you need all windows regardless of focus.
+    """
+    try:
+        from pywinauto import GetFocusedControl
+        try:
+            focused = GetFocusedControl()
+            focused_handle = focused.handle if hasattr(focused, 'handle') else None
+            
+            if not focused_handle:
+                logger.debug("No window has focus")
+                return None
+            
+            # Check if focused window is VS Code
+            try:
+                app = Application(backend="uia").connect(handle=focused_handle)
+                win = app.window(handle=focused_handle)
+                title = win.window_text()
+                
+                if "Visual Studio Code" in title:
+                    logger.debug(f"Focused window is VS Code: {title[:60]}")
+                    return {
+                        'window': win,
+                        'title': title,
+                        'handle': focused_handle
+                    }
+                else:
+                    logger.debug(f"Focused window is not VS Code: {title[:40]}")
+                    return None
+            except Exception as e:
+                logger.debug(f"Cannot connect to focused window: {e}")
+                return None
+        
+        except Exception as e:
+            logger.debug(f"Cannot get focused control: {e}")
+            return None
+            
+    except ImportError:
+        logger.warning("GetFocusedControl not available, falling back to window list")
+        # Fallback: return first window (not ideal, but something)
+        try:
+            windows = find_vscode_windows()
+            if windows:
+                logger.debug("Returning first window as fallback (focus detection unavailable)")
+                return windows[0]
+        except:
+            pass
+        return None
+
+
+def get_window_workspace_path(window_title: str) -> Optional[Path]:
+    """Extract workspace path from VS Code window title.
+    
+    VS Code window titles follow patterns like:
+      "file.md - /path/to/workspace - Visual Studio Code"
+      "Welcome - folder_name (Workspace) - Visual Studio Code"
+      "file.py - WSL: Ubuntu - Workspace/folder - Visual Studio Code"
+    
+    Args:
+        window_title: Full VS Code window title
+        
+    Returns:
+        Workspace path as Path object, or None if cannot extract
+        
+    Note:
+        This is a best-effort heuristic. Not all workspaces may be detectable
+        from the window title alone.
+    """
+    try:
+        # Try to extract path patterns from title
+        parts = window_title.split(" - ")
+        
+        for part in parts:
+            # Skip known keywords
+            if any(skip in part for skip in ['Visual Studio Code', 'Insiders']):
+                continue
+            
+            # Check if looks like a path
+            if '/' in part or '\\' in part or 'Workspace' in part:
+                # Try to clean it up
+                clean = part.rstrip(')')
+                if clean:
+                    logger.debug(f"Extracted workspace from title: {clean}")
+                    return Path(clean)
+        
+        logger.debug(f"Could not extract workspace path from: {window_title[:60]}")
+        return None
+    
+    except Exception as e:
+        logger.debug(f"Error extracting workspace: {e}")
+        return None
+
+
+def list_window_properties(window: "UIAElementInfo") -> Dict[str, str]:
+    """Get detailed properties of a window for debugging.
+    
+    Args:
+        window: pywinauto window object
+        
+    Returns:
+        Dict with title, class, automation_id, etc.
+    """
+    try:
+        return {
+            'title': window.window_text(),
+            'class': window.class_name(),
+            'pid': str(window.process_id()) if hasattr(window, 'process_id') else 'unknown',
+            'handle': str(window.handle) if hasattr(window, 'handle') else 'unknown'
+        }
+    except Exception as e:
+        logger.debug(f"Error getting window properties: {e}")
+        return {'error': str(e)}
