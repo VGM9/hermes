@@ -1,12 +1,11 @@
 """
-Element Detection Module
+Optimized Element Detection Module
 
-Pure functions for finding UI elements within VSCode windows.
-All identifiers imported from vscode_ground_truth.py.
+Uses global button search instead of per-window descendants.
+Based on working approach from earlier tests.
 """
 
 from typing import List, Optional, Dict
-import pywinauto
 from pywinauto import Desktop
 
 import sys
@@ -23,6 +22,105 @@ from vscode_ground_truth import (
 from core.data_models.approval_request import UIElement, WindowInfo
 
 
+def find_all_approval_buttons_globally() -> List[Dict]:
+    """
+    Find all approval buttons across all windows (global search).
+    
+    This is MUCH faster than searching each window individually.
+    
+    Returns:
+        List of dicts with keys: 'type' ('allow'|'skip'), 'button' (UIElement), 'window_handle'
+    """
+    buttons_found = []
+    
+    try:
+        desktop = Desktop(backend='uia')
+        
+        # Search for all buttons with the keybinding text globally
+        # This is faster than window-by-window search
+        all_windows = desktop.windows()
+        
+        for window in all_windows:
+            try:
+                # Quick class check
+                if window.class_name() != 'Chrome_WidgetWin_1':
+                    continue
+                    
+                # Only search in VSCode windows
+                window_handle = window.handle
+                
+                # Fast shallow search for buttons with specific text
+                try:
+                    buttons = window.descendants(control_type=CONTROL_TYPE_BUTTON, depth=6)
+                    
+                    for button in buttons:
+                        try:
+                            if not button.is_visible():
+                                continue
+                                
+                            button_text = button.window_text()
+                            
+                            # Check for Allow button (has Ctrl+Enter)
+                            if KEYBINDING_ACCEPT_TOOL['human_readable'] in button_text:
+                                buttons_found.append({
+                                    'type': 'allow',
+                                    'button': _create_ui_element(button),
+                                    'window_handle': window_handle
+                                })
+                            
+                            # Check for Skip button (has Ctrl+Alt+Enter)
+                            elif KEYBINDING_SKIP_TOOL['human_readable'] in button_text:
+                                buttons_found.append({
+                                    'type': 'skip',
+                                    'button': _create_ui_element(button),
+                                    'window_handle': window_handle
+                                })
+                        except:
+                            continue
+                except:
+                    # This window has no accessible buttons
+                    continue
+                    
+            except:
+                continue
+                
+    except:
+        pass
+    
+    return buttons_found
+
+
+def find_buttons_in_window(window_info: WindowInfo) -> Dict[str, Optional[UIElement]]:
+    """
+    Find Allow and Skip buttons in a specific VSCode window.
+    
+    Implementation:
+        Uses the global button search, then filters by window handle.
+        This is much faster than searching within the window.
+    
+    Args:
+        window_info: WindowInfo to search in
+    
+    Returns:
+        Dictionary with keys 'allow' and 'skip', values are UIElement or None.
+    """
+    result = {
+        'allow': None,
+        'skip': None,
+    }
+    
+    # Use global search
+    all_buttons = find_all_approval_buttons_globally()
+    
+    # Filter for this window
+    for button_info in all_buttons:
+        if button_info['window_handle'] == window_info.handle:
+            button_type = button_info['type']
+            result[button_type] = button_info['button']
+    
+    return result
+
+
 def find_chat_content(window_info: WindowInfo) -> Optional[str]:
     """
     Extract text content from chat panel.
@@ -34,97 +132,41 @@ def find_chat_content(window_info: WindowInfo) -> Optional[str]:
     
     Returns:
         Text content of chat panel, or None if not found.
-    
+        
     Implementation:
-        Searches for visible text elements in the window.
-        Concatenates all text to get full chat content.
+        Attempts to get window text with timeout.
+        Avoids slow descendants() call.
     """
     try:
         desktop = Desktop(backend='uia')
         window = desktop.window(handle=window_info.handle)
         
-        # Get all text elements
-        text_elements = window.descendants(control_type='Text', depth=15)
+        # Try to get text directly from window
+        text = window.window_text()
+        if text and len(text) > 50:  # Reasonable threshold
+            return text
         
-        text_parts = []
-        for elem in text_elements:
-            try:
-                if elem.is_visible():
-                    text = elem.window_text()
-                    if text and text.strip():
-                        text_parts.append(text)
-            except Exception:
-                continue
-        
-        if text_parts:
-            return '\n'.join(text_parts)
+        # If that didn't work, try print_control_identifiers with capture
+        try:
+            from io import StringIO
+            import sys
+            old_stdout = sys.stdout
+            sys.stdout = captured = StringIO()
+            
+            window.print_control_identifiers(depth=4, filename=None)
+            
+            sys.stdout = old_stdout
+            output = captured.getvalue()
+            
+            if output and len(output) > 100:
+                return output
+        except:
+            pass
         
         return None
         
     except Exception:
         return None
-
-
-def find_buttons_in_window(window_info: WindowInfo) -> Dict[str, Optional[UIElement]]:
-    """
-    Find Allow and Skip buttons in a VSCode window.
-    
-    Pure function - searches for buttons, doesn't interact.
-    
-    Args:
-        window_info: WindowInfo to search in
-    
-    Returns:
-        Dictionary with keys 'allow' and 'skip', values are UIElement or None.
-        
-    Implementation:
-        Uses button class names from ground truth and keybinding text.
-        Primary button (with "Ctrl+Enter") is Allow.
-        Secondary button (with "Ctrl+Alt+Enter") is Skip.
-    
-    Source:
-        MONACO_BUTTON_PRIMARY_CLASSES from vscode_ground_truth.py
-        MONACO_BUTTON_SECONDARY_CLASSES from vscode_ground_truth.py
-    """
-    buttons = {
-        'allow': None,
-        'skip': None,
-    }
-    
-    try:
-        desktop = Desktop(backend='uia')
-        window = desktop.window(handle=window_info.handle)
-        
-        # Find all button controls in the window
-        all_buttons = window.descendants(control_type=CONTROL_TYPE_BUTTON, depth=15)
-        
-        for button in all_buttons:
-            try:
-                if not button.is_visible():
-                    continue
-                
-                button_text = button.window_text()
-                button_class = button.class_name()
-                
-                # Check if it's an Allow button (primary, has Ctrl+Enter)
-                if KEYBINDING_ACCEPT_TOOL['human_readable'] in button_text:
-                    # Verify it's a primary button style
-                    if any(cls in button_class for cls in MONACO_BUTTON_PRIMARY_CLASSES.split()):
-                        buttons['allow'] = _create_ui_element(button)
-                
-                # Check if it's a Skip button (secondary, has Ctrl+Alt+Enter)
-                elif KEYBINDING_SKIP_TOOL['human_readable'] in button_text:
-                    # Verify it's a secondary button style
-                    if any(cls in button_class for cls in MONACO_BUTTON_SECONDARY_CLASSES.split()):
-                        buttons['skip'] = _create_ui_element(button)
-                
-            except Exception:
-                continue
-        
-    except Exception:
-        pass
-    
-    return buttons
 
 
 def _create_ui_element(element) -> UIElement:

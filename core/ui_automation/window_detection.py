@@ -76,30 +76,12 @@ def has_chat_panel(window_info: WindowInfo) -> bool:
         True if window has chat panel, False otherwise.
     
     Implementation:
-        Looks for Edit control (text input) within chat groups.
-        This is more reliable than searching for specific text.
+        For now, assume all VSCode windows might have chat panels.
+        More sophisticated detection can be added later if needed.
+        The real check happens in has_approval_request().
     """
-    try:
-        desktop = Desktop(backend='uia')
-        window = desktop.window(handle=window_info.handle)
-        
-        # Look for chat-related UI elements
-        # Chat panels contain Edit controls for user input
-        edit_controls = window.descendants(control_type=CONTROL_TYPE_EDIT, depth=10)
-        
-        # VSCode chat panels have at least one visible Edit control
-        for edit in edit_controls:
-            try:
-                if edit.is_visible() and edit.is_enabled():
-                    # Found an active chat input
-                    return True
-            except Exception:
-                continue
-        
-        return False
-        
-    except Exception:
-        return False
+    # Simplified: let the button detection be the authoritative check
+    return True
 
 
 def get_window_by_handle(handle: int) -> Optional[WindowInfo]:
