@@ -1,0 +1,15 @@
+{
+  "name": "@vgm9/hermes",
+  "version": "0.1.0",
+  "description": "Inter-agent messaging system for VS Code Copilot sessions",
+  "type": "module",
+  "bin": {
+    "hermes": "./bin/hermes.js"
+  },
+  "scripts": {
+    "hermes": "node bin/hermes.js"
+  },
+  "keywords": ["vscode", "copilot", "hermes", "inter-agent", "messaging"],
+  "author": "ALTAIR/9 (0.0.Q)",
+  "license": "MIT"
+}
