@@ -257,3 +257,104 @@ def get_current_window_sessions() -> List[Dict[str, str]]:
     except Exception as e:
         logger.error(f"Error computing workspace hash: {e}")
         return []
+
+
+def get_calling_session_by_modification() -> Optional[Dict[str, str]]:
+    """Find the session that called this code by looking at file modification times.
+    
+    CRITICAL ARCHITECTURE: Don't rely on window focus.
+    When a tool (run_in_terminal, etc.) executes, it modifies the session state.
+    Find the MOST RECENTLY MODIFIED session - that's the one that called us.
+    
+    This is immune to window switching:
+    - User runs command in Session A
+    - Session A state file gets modified (timestamp updated)
+    - Even if user switches to Window B, Session A has the newest timestamp
+    - We find Session A by looking at file modification times, not UI focus
+    
+    Returns:
+        Dict with session info {session_id, workspace_hash, path, title},
+        or None if cannot determine (e.g., no sessions exist).
+        
+    Example:
+        >>> session = get_calling_session_by_modification()
+        >>> if session:
+        ...     print(f"Code called from: {session['session_id']}")
+        ...     print(f"In workspace: {session['workspace_hash']}")
+    """
+    import hermes_config
+    import os
+    
+    logger.info("Scanning for recently modified session (execution artifact detection)")
+    
+    try:
+        appdata = hermes_config.get_appdata_path()
+        
+        recent_sessions = []
+        
+        # Scan all workspaces
+        for ws_dir in appdata.iterdir():
+            if not ws_dir.is_dir():
+                continue
+            
+            workspace_hash = ws_dir.name
+            
+            # Scan all sessions in this workspace
+            sessions_dir = ws_dir / 'chatEditingSessions'
+            if not sessions_dir.exists():
+                continue
+            
+            for session_dir in sessions_dir.iterdir():
+                if not session_dir.is_dir():
+                    continue
+                
+                session_id = session_dir.name
+                state_file = session_dir / 'state.json'
+                
+                # Get modification time
+                try:
+                    if state_file.exists():
+                        mtime = os.path.getmtime(state_file)
+                        
+                        # Try to read session title
+                        title = 'Unknown'
+                        try:
+                            with open(state_file, 'r', encoding='utf-8') as f:
+                                state = json.load(f)
+                                title = state.get('title', 'Unknown')
+                        except Exception:
+                            pass
+                        
+                        recent_sessions.append({
+                            'session_id': session_id,
+                            'workspace_hash': workspace_hash,
+                            'path': str(session_dir),
+                            'title': title,
+                            'mtime': mtime
+                        })
+                except Exception as e:
+                    logger.debug(f"Cannot get mtime for {session_id}: {e}")
+        
+        if not recent_sessions:
+            logger.warning("No sessions found in AppData")
+            return None
+        
+        # Find most recently modified
+        most_recent = max(recent_sessions, key=lambda s: s['mtime'])
+        
+        logger.info(f"Most recently modified session: {most_recent['session_id']}")
+        logger.info(f"  Title: {most_recent['title']}")
+        logger.info(f"  Workspace: {most_recent['workspace_hash']}")
+        logger.info(f"  Modified: {time.ctime(most_recent['mtime'])}")
+        
+        # Return without mtime field
+        return {
+            'session_id': most_recent['session_id'],
+            'workspace_hash': most_recent['workspace_hash'],
+            'path': most_recent['path'],
+            'title': most_recent['title']
+        }
+    
+    except Exception as e:
+        logger.error(f"Failed to find calling session: {e}")
+        return None
