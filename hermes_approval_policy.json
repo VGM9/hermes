@@ -1,0 +1,153 @@
+{
+  "$schema": "https://vgm9.internal/schemas/approval-policy.json",
+  "version": "1.0",
+  "description": "System policies for AI agent approval decisions",
+  
+  "approval_rules": {
+    "rules": [
+      {
+        "id": "ALWAYS_APPROVE_READ_OPERATIONS",
+        "description": "Read-only file operations are safe",
+        "match": {
+          "action_name_contains": ["read", "grep", "file_search", "list_dir"],
+          "action_name_not_contains": ["write", "delete", "rm"]
+        },
+        "decision": "APPROVE",
+        "reason": "Read-only operations pose no risk"
+      },
+      
+      {
+        "id": "ALWAYS_APPROVE_CONFIGURATION_READS",
+        "description": "Reading configuration is safe",
+        "match": {
+          "action_name_contains": ["get_python_environment", "configure_notebook", "list_packages"]
+        },
+        "decision": "APPROVE",
+        "reason": "Configuration reads are informational"
+      },
+      
+      {
+        "id": "ALWAYS_APPROVE_TOOL_DISCOVERY",
+        "description": "Discovering available tools is safe",
+        "match": {
+          "action_name_contains": ["listDebugSessions", "qopilot_mcp_control", "fetch_webpage"]
+        },
+        "decision": "APPROVE",
+        "reason": "Tool discovery has no side effects"
+      },
+
+      {
+        "id": "REQUIRE_REVIEW_WRITE_OPERATIONS",
+        "description": "Write operations require human review",
+        "match": {
+          "action_name_contains": ["create_file", "replace_string_in_file", "multi_replace"]
+        },
+        "decision": "REQUEST_REVIEW",
+        "reason": "Write operations modify source code"
+      },
+
+      {
+        "id": "REQUIRE_REVIEW_TERMINAL_EXECUTION",
+        "description": "Terminal commands require review",
+        "match": {
+          "action_name_contains": ["run_in_terminal"]
+        },
+        "decision": "REQUEST_REVIEW",
+        "reason": "Terminal commands have system implications"
+      },
+
+      {
+        "id": "REQUIRE_REVIEW_GIT_OPERATIONS",
+        "description": "Git operations require review",
+        "match": {
+          "action_name_contains": ["git", "commit", "push", "pull"]
+        },
+        "decision": "REQUEST_REVIEW",
+        "reason": "Git operations affect repository state"
+      },
+
+      {
+        "id": "REQUIRE_REVIEW_DESTRUCTIVE",
+        "description": "Destructive operations require review",
+        "match": {
+          "action_name_contains": ["delete", "remove", "rm", "unlink"]
+        },
+        "decision": "REQUEST_REVIEW",
+        "reason": "Destructive operations cannot be undone"
+      },
+
+      {
+        "id": "SKIP_NETWORK_WRITE_WITHOUT_APPROVAL",
+        "description": "Network writes need explicit approval",
+        "match": {
+          "action_name_contains": ["install_python_packages", "gh repo", "push"]
+        },
+        "decision": "SKIP",
+        "reason": "Network operations require explicit human approval per security policy"
+      }
+    ],
+    
+    "fallback": {
+      "default_decision": "REQUEST_REVIEW",
+      "reason": "Unknown action - require human review"
+    }
+  },
+
+  "decision_context": {
+    "description": "Additional context for decision-making",
+    "factors": {
+      "session_type": {
+        "main": "User explicitly running code in main window",
+        "external": "Code running in detached chat panel",
+        "other": "Code running in unknown context"
+      },
+      "split_button": {
+        "true": "User can choose between 'Allow Once' and 'Always Allow'",
+        "false": "Only binary Allow/Skip option"
+      }
+    }
+  },
+
+  "approval_options": {
+    "APPROVE": {
+      "action": "Click Allow button",
+      "split_selection": "Select 'Always Allow' if available (default)",
+      "log_level": "INFO",
+      "reason_required": false
+    },
+    "REQUEST_REVIEW": {
+      "action": "Wait for human to decide",
+      "log_level": "WARNING",
+      "reason_required": true
+    },
+    "SKIP": {
+      "action": "Click Skip button",
+      "log_level": "WARNING",
+      "reason_required": true,
+      "reason_format": "Security policy denies: {reason}"
+    }
+  },
+
+  "audit_requirements": {
+    "description": "What must be logged for every decision",
+    "fields": [
+      "decision_id",
+      "timestamp",
+      "policy_rule_matched",
+      "action_name",
+      "session_id",
+      "window_type",
+      "decision_made",
+      "decision_reason",
+      "alternative_decision",
+      "deciding_agent_id",
+      "approving_agent_id"
+    ]
+  },
+
+  "escalation": {
+    "request_review_timeout_sec": 300,
+    "max_auto_approvals_per_session": 10,
+    "max_auto_approvals_per_hour": 50
+  }
+}
