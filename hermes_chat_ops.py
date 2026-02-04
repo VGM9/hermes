@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import Optional
+from typing import Optional, List, Dict
 from pywinauto.keyboard import send_keys
 
 logger = logging.getLogger(__name__)
@@ -112,3 +112,114 @@ def type_without_send(
     except Exception as e:
         logger.error(f"Failed to type message: {e}")
         raise ChatOperationError(f"Cannot type message: {e}") from e
+
+
+def find_unsent_chat_messages() -> List[Dict[str, str]]:
+    """Find all unsent messages across open VSCode windows.
+    
+    Scans all open VSCode windows for text in chat input boxes that has not yet
+    been sent. Useful for verification or recovery workflows.
+    
+    Returns:
+        List of dicts with:
+        - 'window_title': Full window title
+        - 'chat_text': Unsent message text
+        - 'text_length': Length of unsent text
+        
+    Example:
+        >>> messages = find_unsent_chat_messages()
+        >>> for msg in messages:
+        ...     print(f"{msg['window_title']}: {msg['chat_text']}")
+    
+    Note:
+        Returns empty list if no unsent messages found.
+        Must be run on Windows (uses pywinauto).
+    """
+    # Import here to avoid circular import
+    import hermes_window_ops
+    import signal
+    
+    unsent_messages = []
+    
+    def timeout_handler(signum, frame):
+        raise TimeoutError("Window inspection timeout")
+    
+    try:
+        windows = hermes_window_ops.find_vscode_windows()
+        logger.debug(f"Scanning {len(windows)} VSCode windows for unsent messages")
+        
+        for w in windows:
+            try:
+                window_spec = w['window']
+                
+                # Set timeout for this window's inspection
+                try:
+                    # Only inspect if window is still valid
+                    title = w['title']
+                    descendants = []
+                    
+                    # Try to get descendants with minimal timeout
+                    try:
+                        descendants = list(window_spec.descendants())
+                    except Exception as e:
+                        logger.debug(f"Skipping window (inspection error): {e}")
+                        continue
+                    
+                except Exception as e:
+                    logger.debug(f"Error with window: {e}")
+                    continue
+                
+                for control in descendants:
+                    try:
+                        control_type = str(control.element_info.control_type)
+                        if "Edit" not in control_type:
+                            continue
+                        
+                        text = control.window_text()
+                        
+                        # Filter for substantial unsent messages
+                        if not text or len(text) < 5:
+                            continue
+                        
+                        # Skip known non-chat UI text
+                        skip_patterns = [
+                            'Copyright', 'PowerShell', 'Terminal', 'environment is stale',
+                            'Allow reading', 'outside of', 'Show Environment',
+                            'Restart Visual Studio', 'update.', 'command for more',
+                            'The editor is not accessible', 'screen reader',
+                            'Press Enter to send', 'Chat Input', 'Chat Accessibility'
+                        ]
+                        
+                        if any(pattern in text for pattern in skip_patterns):
+                            continue
+                        
+                        # Don't report file content (detect by looking for too many newlines)
+                        newline_count = text.count('\n')
+                        if newline_count > 5:
+                            continue
+                        
+                        unsent_messages.append({
+                            'window_title': w['title'],
+                            'chat_text': text,
+                            'text_length': len(text)
+                        })
+                        
+                        logger.info(f"Found unsent message in {w['title']}: {len(text)} chars")
+                    
+                    except Exception as e:
+                        logger.debug(f"Error inspecting control: {e}")
+                        continue
+                        
+            except KeyboardInterrupt:
+                logger.warning("Window inspection interrupted")
+                break
+            except Exception as e:
+                logger.debug(f"Error scanning window: {e}")
+                continue
+        
+        logger.info(f"Found {len(unsent_messages)} unsent message(s)")
+        return unsent_messages
+        
+    except Exception as e:
+        logger.error(f"Failed to find unsent messages: {e}")
+        raise ChatOperationError(f"Cannot find unsent messages: {e}") from e
