@@ -311,6 +311,34 @@ def approve_agent(window, always=True):
     return True
 
 
+def skip_agent(window):
+    """Click the Skip button to reject the pending command.
+    
+    Args:
+        window: The VS Code window
+    
+    Returns:
+        True on success
+    """
+    state = detect_approval_state(window)
+    
+    if not state['skip_button']:
+        print("ERROR: No Skip button found")
+        return False
+    
+    btn = state['skip_button']
+    
+    print("Clicking Skip button...")
+    try:
+        btn.click_input()
+        time.sleep(0.5)
+        print("Clicked Skip button successfully")
+        return True
+    except Exception as e:
+        print(f"Failed to click Skip button: {e}")
+        return False
+
+
 def verify_wake(window, max_attempts=3):
     """Verify the agent is actually awake (no more approval pending).
     
