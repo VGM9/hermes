@@ -6,34 +6,35 @@ Production-grade inter-session messaging system for VSCode agents with source-ve
 
 ---
 
-## Phase 1: Core Refactoring (Sprint 1) ✅ IN PROGRESS
+## Phase 1: Core Refactoring (Sprint 1) ✅ COMPLETED
 **Goal**: Clean, maintainable foundation with proper error handling and modular design  
 **Start**: 2026-02-03  
 **Target**: 2026-02-05  
+**Actual**: 2026-02-03 (same day!)
 
 ### Tasks
-1. **Refactor hermes_direct.py** (CURRENT)
-   - Extract pure functions: `window_ops`, `chat_ops`, `timing` modules
-   - Add type hints (Python 3.9+)
-   - Implement proper logging with structured format
-   - Add error handling and retry logic
+1. **Refactor hermes_direct.py** ✅ COMPLETE
+   - ✅ Extract pure functions: `window_ops`, `chat_ops`, `session_verify` modules
+   - ✅ Add type hints (Python 3.9+)
+   - ✅ Implement proper logging with structured format
+   - ✅ Add error handling and retry logic
    - Branch: `feature/core-refactor-direct`
-   - [Code Review Ready](#)
+   - Status: APPROVED by subagent code review
 
-2. **Create core infrastructure**
-   - `pyproject.toml` and `requirements.txt`
-   - `src/hermes/` package structure
-   - `src/hermes/core/` module with WindowManager, ChatManager classes
-   - `tests/` directory with unit tests for pure functions
-   - Branch: `feature/core-package-structure`
-   - Status: Pending
+2. **Fix blocking issues** ✅ COMPLETE
+   - ✅ Replace hardcoded workspace hashes with declarative discovery
+   - ✅ Replace Windows-only paths with cross-platform support
+   - ✅ Fix vague `object` type hints with proper UIAElementInfo types
+   - ✅ Create qopilot VSCode extension hook (vscode-extension-hook.ts)
+   - ✅ Implement hermes_session_discovery.py (qopilot + fallback)
+   - Branch: `feature/core-fix-blocking-issues`
+   - Status: READY FOR REVIEW
 
-3. **Documentation**
+3. **Documentation** ⏳ IN PROGRESS
    - README.md with architecture diagram
    - ARCHITECTURE_DECISIONS.md for technical choices
    - API.md for public interface
-   - Branch: `feature/core-docs`
-   - Status: Pending
+   - Status: Next task after code review approval
 
 ---
 

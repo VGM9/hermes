@@ -6,7 +6,7 @@ This is declarative (ask VSCode for sessions) not imperative (scan directories).
 
 import logging
 import json
-from typing import Optional, list
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
