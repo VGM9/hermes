@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 HERMES Direct - Send message to agent via UI automation
 
@@ -18,6 +19,16 @@ import json
 from pathlib import Path
 from pywinauto import Application, findwindows
 from pywinauto.keyboard import send_keys
+
+
+def safe_print(msg):
+    """Print with fallback for non-UTF8 terminals (Windows cp1252)"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # Replace Unicode symbols with ASCII equivalents
+        safe_msg = msg.replace('✓', '[OK]').replace('✗', '[FAIL]')
+        print(safe_msg.encode('ascii', 'replace').decode('ascii'))
 
 
 # AppData for verification
@@ -130,13 +141,13 @@ def send_message(agent_pattern, message, verify=True, timeout=5.0, no_enter=Fals
         while time.time() - start < timeout:
             count_after = get_session_request_count(agent_pattern)
             if count_after and count_after > count_before:
-                print(f"✓ Verified: request count {count_before} -> {count_after}")
+                safe_print(f"✓ Verified: request count {count_before} -> {count_after}")
                 return True, None
             time.sleep(0.5)
         
         return False, f"Verification timeout ({timeout}s). Message may not have been delivered."
     
-    print("✓ Sent (unverified)")
+    safe_print("✓ Sent (unverified)")
     return True, None
 
 
@@ -187,10 +198,10 @@ def main():
     success, error = send_message(agent, message, verify=verify, timeout=timeout, no_enter=no_enter)
     
     if success:
-        print(f"✓ Message delivered to {agent}")
+        safe_print(f"✓ Message delivered to {agent}")
         sys.exit(0)
     else:
-        print(f"✗ FAILED: {error}")
+        safe_print(f"✗ FAILED: {error}")
         if "No window" in str(error) or "not found" in str(error).lower():
             sys.exit(2)
         else:
