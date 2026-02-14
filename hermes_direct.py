@@ -115,13 +115,17 @@ def send_message(agent_pattern, message, verify=True, timeout=5.0, no_enter=Fals
     win.set_focus()
     time.sleep(0.3)
     
-    # Open chat using keyboard shortcut
-    # Common shortcuts: Ctrl+Shift+I (Copilot Chat), Ctrl+L (some versions)
-    print("Opening chat panel...")
-    send_keys('^+i')  # Ctrl+Shift+I (Copilot Chat)
-    time.sleep(0.8)
+    # Open chat using identity-preserving method
+    print("Activating chat input (identity-preserving)...")
+    from hermes_chat_ops import click_chat_input
+    if not click_chat_input(win, open_delay_sec=0.5):
+        # Fallback: try keyboard shortcut with warning
+        print("⚠️  WARNING: Falling back to Ctrl+Shift+I (destroys agent identity)")
+        print("   See: __/.github/instructions/HERMES-CRITICAL-BUG.md")
+        send_keys('^+i')
+        time.sleep(0.8)
     
-    # Type message into chat input (should be focused after opening)
+    # Type message into chat input
     print(f"Typing message ({len(message)} chars)...")
     send_keys(message, with_spaces=True, pause=0.01)
     time.sleep(0.3)

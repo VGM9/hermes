@@ -58,13 +58,22 @@ def send_message_to_agent(
 ) -> Tuple[bool, Optional[str]]:
     """Send message to agent window with proper error handling.
     
+    ⚠️ CRITICAL WARNING: Ctrl+Shift+I DESTROYS AGENT IDENTITY ⚠️
+    
+    The default keybinding (^+i / Ctrl+Shift+I) resets VS Code agent dropdown
+    from custom agents to generic "Agent", destroying specialized identity.
+    
+    Consequences: Recipient loses tools, instructions, specialized context.
+    See: __/.github/instructions/HERMES-CRITICAL-BUG.md
+    See: __/projects/hermes-protocol-fixes/M2-IDENTITY-PRESERVATION.md
+    
     Args:
         agent_pattern: Agent identifier in window title
         message: Message to send
         verify: Whether to verify delivery via AppData
         timeout_sec: Verification timeout
         send_enter: Whether to press Enter after typing
-        keybinding: Keyboard shortcut to open chat (default Ctrl+Shift+I)
+        keybinding: Keyboard shortcut to open chat (default Ctrl+Shift+I - DANGEROUS!)
         
     Returns:
         (success: bool, error_message: str or None)
@@ -98,10 +107,14 @@ def send_message_to_agent(
         logger.error(f"Failed to focus window: {e}")
         return False, f"Window focus failed: {e}"
     
-    # Step 4: Open chat
+    # Step 4: Open chat (identity-preserving method)
     try:
-        chat_ops.open_chat(keybinding=keybinding)
-        logger.info("✓ Chat opened")
+        logger.info("Activating chat input (identity-preserving)...")
+        if not chat_ops.click_chat_input(win):
+            # Fallback to keyboard shortcut with warning
+            logger.warning("⚠️  Falling back to keyboard shortcut (destroys agent identity)")
+            chat_ops.open_chat(keybinding=keybinding)
+        logger.info("✓ Chat activated")
     except chat_ops.ChatOperationError as e:
         logger.error(str(e))
         return False, str(e)

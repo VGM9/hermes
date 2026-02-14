@@ -14,12 +14,86 @@ class ChatOperationError(Exception):
     pass
 
 
+def click_chat_input(
+    window,
+    open_delay_sec: float = 0.5
+) -> bool:
+    """Click chat input field directly (IDENTITY-PRESERVING alternative to Ctrl+Shift+I).
+    
+    ✅ SAFE: This method does NOT reset agent selection dropdown.
+    
+    Searches for the chat input edit control and clicks it to activate chat.
+    Preserves agent identity unlike keyboard shortcuts.
+    
+    Args:
+        window: pywinauto window object (from hermes_window_ops)
+        open_delay_sec: Time to wait for chat to activate (default: 0.5s)
+        
+    Returns:
+        True if chat input found and clicked, False otherwise
+        
+    Raises:
+        ChatOperationError: If window interaction fails
+    """
+    try:
+        logger.debug("Searching for chat input field...")
+        
+        # Find Edit controls (chat input is an Edit control in VS Code)
+        edit_controls = window.descendants(control_type="Edit")
+        
+        for edit in edit_controls:
+            name = edit.element_info.name.lower() if hasattr(edit.element_info, 'name') else ""
+            automation_id = edit.element_info.automation_id.lower() if hasattr(edit.element_info, 'automation_id') else ""
+            
+            # Look for chat-related identifiers
+            if any(keyword in name or keyword in automation_id 
+                   for keyword in ['chat', 'copilot', 'ask', 'input']):
+                try:
+                    logger.info(f"Found chat input: {name or automation_id}")
+                    edit.click_input()
+                    time.sleep(open_delay_sec)
+                    logger.info("✓ Chat input activated (identity preserved)")
+                    return True
+                except Exception as e:
+                    logger.debug(f"Failed to click edit control: {e}")
+                    continue
+        
+        logger.warning("Could not find chat input field")
+        return False
+        
+    except Exception as e:
+        logger.error(f"Failed to activate chat: {e}")
+        raise ChatOperationError(f"Cannot activate chat input: {e}") from e
+
+
 def open_chat(
     keybinding: str = "^+i",
     open_delay_sec: float = 0.8,
     focus_delay_sec: float = 0.3
 ) -> None:
     """Open VS Code chat panel using keyboard shortcut.
+    
+    ⚠️ CRITICAL WARNING: Ctrl+Shift+I DESTROYS AGENT IDENTITY ⚠️
+    
+    This keyboard shortcut (^+i) resets VS Code agent selection dropdown
+    from custom agents (e.g., "0.0.Q (HUSK)", "ALTAIR") to default "Agent".
+    
+    Consequences:
+    - Recipient loses specialized agent identity
+    - Custom tools (qhoami, qopilot, etc.) become unavailable
+    - Agent instructions (.agent.md frontmatter) ignored
+    - Specialized context lost
+    - False memories/confusion from identity contamination
+    
+    DO NOT USE for inter-agent messaging unless you have:
+    1. Verified agent selection before opening chat
+    2. Method to restore agent selection after opening  
+    3. Documented this risk to recipient
+    
+    RECOMMENDED ALTERNATIVE: Use click_chat_input(window) instead (identity-preserving)
+    
+    See: __/.github/instructions/HERMES-CRITICAL-BUG.md
+    See: __/projects/hermes-protocol-fixes/M2-IDENTITY-PRESERVATION.md
     
     Args:
         keybinding: Keyboard shortcut to send (default: Ctrl+Shift+I = "^+i")
