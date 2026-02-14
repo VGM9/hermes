@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 HERMES Direct v2 - Refactored with proper structure, typing, and error handling
 
@@ -24,6 +25,16 @@ import hermes_window_ops as window_ops
 import hermes_chat_ops as chat_ops
 import hermes_session_verify as session_verify
 import hermes_config
+
+
+def safe_print(msg):
+    """Print with fallback for non-UTF8 terminals (Windows cp1252)"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # Replace Unicode symbols with ASCII equivalents
+        safe_msg = msg.replace('✓', '[OK]').replace('✗', '[FAIL]')
+        print(safe_msg.encode('ascii', 'replace').decode('ascii'))
 
 
 # Configure logging

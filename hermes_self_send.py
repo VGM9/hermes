@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # DEPRECATED: This tool uses Ctrl+I which triggers voice input, not chat
 # DO NOT USE
 """
@@ -66,14 +67,14 @@ def type_without_send(message: str):
             print(f"Typing message ({len(message)} chars)...")
             send_keys(message, with_spaces=True, pause=0.02)
             
-            print("✓ Message typed (NOT sent)")
+            safe_print("✓ Message typed (NOT sent)")
             return True
             
         except Exception as e:
             print(f"Error with window: {e}")
             continue
     
-    print("✗ No VS Code window found")
+    safe_print("✗ No VS Code window found")
     return False
 
 
@@ -87,7 +88,7 @@ def spawn_deferred_send():
     watcher_script = SCRIPT_DIR / "hermes_wait_send.py"
     
     if not watcher_script.exists():
-        print(f"✗ Watcher script not found: {watcher_script}")
+        safe_print(f"✗ Watcher script not found: {watcher_script}")
         print("  Creating it now...")
         create_watcher_script(watcher_script)
     
@@ -99,7 +100,7 @@ def spawn_deferred_send():
         stderr=subprocess.DEVNULL,
         creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
     )
-    print("✓ Watcher spawned")
+    safe_print("✓ Watcher spawned")
 
 
 def create_watcher_script(path: Path):
@@ -120,6 +121,16 @@ finishes their turn, and then this watcher sends it.
 import time
 import sys
 from pywinauto import Application, findwindows
+
+
+def safe_print(msg):
+    """Print with fallback for non-UTF8 terminals (Windows cp1252)"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # Replace Unicode symbols with ASCII equivalents
+        safe_msg = msg.replace('✓', '[OK]').replace('✗', '[FAIL]')
+        print(safe_msg.encode('ascii', 'replace').decode('ascii'))
 
 MAX_WAIT_SECONDS = 60  # Give up after 1 minute
 
@@ -167,14 +178,14 @@ def main():
                     win.set_focus()
                     time.sleep(0.2)
                     btn.click_input()
-                    print("✓ Sent!")
+                    safe_print("✓ Sent!")
                     return 0
             except Exception as e:
                 print(f"Button found but click failed: {e}")
         
         time.sleep(0.5)
     
-    print("✗ Timeout waiting for send button")
+    safe_print("✗ Timeout waiting for send button")
     return 1
 
 
@@ -182,7 +193,7 @@ if __name__ == "__main__":
     sys.exit(main())
 '''
     path.write_text(content)
-    print(f"✓ Created: {path}")
+    safe_print(f"✓ Created: {path}")
 
 
 def main():

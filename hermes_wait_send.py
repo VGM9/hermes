@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # DEPRECATED: Relies on hermes_self_send.py which is broken (Ctrl+I = voice input)
 # DO NOT USE
 """
@@ -18,6 +19,16 @@ Author: ALTAIR lineage (0.0.Q → 0.8.Q)
 import time
 import sys
 from pywinauto import Application, findwindows
+
+
+def safe_print(msg):
+    """Print with fallback for non-UTF8 terminals (Windows cp1252)"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # Replace Unicode symbols with ASCII equivalents
+        safe_msg = msg.replace('✓', '[OK]').replace('✗', '[FAIL]')
+        print(safe_msg.encode('ascii', 'replace').decode('ascii'))
 
 MAX_WAIT_SECONDS = 60  # Give up after 1 minute
 
@@ -66,14 +77,14 @@ def main():
                     win.set_focus()
                     time.sleep(0.2)
                     btn.click_input()
-                    print("✓ Message sent!")
+                    safe_print("✓ Message sent!")
                     return 0
             except Exception as e:
                 print(f"Button found but click failed: {e}")
         
         time.sleep(0.5)
     
-    print(f"✗ Timeout after {MAX_WAIT_SECONDS}s waiting for send button")
+    safe_print(f"✗ Timeout after {MAX_WAIT_SECONDS}s waiting for send button")
     return 1
 
 

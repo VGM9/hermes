@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """HERMES Core - Pure functions for chat operations."""
 
 import logging

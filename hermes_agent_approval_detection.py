@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Agent Approval Detection - VSCode Source-Based Implementation
 Identifies paused chat agents waiting for approval using stable identifiers from VSCode source.
