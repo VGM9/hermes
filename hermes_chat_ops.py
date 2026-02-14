@@ -44,12 +44,13 @@ def click_chat_input(
         for edit in edit_controls:
             name = edit.element_info.name.lower() if hasattr(edit.element_info, 'name') else ""
             automation_id = edit.element_info.automation_id.lower() if hasattr(edit.element_info, 'automation_id') else ""
+            class_name = edit.element_info.class_name.lower() if hasattr(edit.element_info, 'class_name') else ""
             
-            # Look for chat-related identifiers
-            if any(keyword in name or keyword in automation_id 
-                   for keyword in ['chat', 'copilot', 'ask', 'input']):
+            # Look for chat input specifically
+            # VS Code pattern: "Chat Input (AgentName), undefined, Model..."
+            if "chat input" in name or class_name == "native-edit-context":
                 try:
-                    logger.info(f"Found chat input: {name or automation_id}")
+                    logger.info(f"Found chat input: {name[:60] if name else class_name}")
                     edit.click_input()
                     time.sleep(open_delay_sec)
                     logger.info("✓ Chat input activated (identity preserved)")
