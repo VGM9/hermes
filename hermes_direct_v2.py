@@ -119,21 +119,21 @@ def send_message_to_agent(
         logger.error(str(e))
         return False, str(e)
     
-    # Step 5: Type message
+    # Step 5: Type message (WINDOW-SCOPED for safety)
     try:
         if send_enter:
-            chat_ops.type_message(message)
+            chat_ops.type_message(win, message)
         else:
-            chat_ops.type_without_send(message)
+            chat_ops.type_without_send(win, message)
         logger.info(f"✓ Message typed ({len(message)} chars)")
     except chat_ops.ChatOperationError as e:
         logger.error(str(e))
         return False, str(e)
     
-    # Step 6: Send if requested
+    # Step 6: Send if requested (WINDOW-SCOPED)
     if send_enter:
         try:
-            chat_ops.send_message()
+            chat_ops.send_message(win)
             logger.info("✓ Message sent")
         except chat_ops.ChatOperationError as e:
             logger.error(str(e))

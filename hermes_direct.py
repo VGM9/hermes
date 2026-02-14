@@ -125,15 +125,15 @@ def send_message(agent_pattern, message, verify=True, timeout=5.0, no_enter=Fals
         send_keys('^+i')
         time.sleep(0.8)
     
-    # Type message into chat input
+    # Type message into chat input (WINDOW-SCOPED - critical for safety)
     print(f"Typing message ({len(message)} chars)...")
-    send_keys(message, with_spaces=True, pause=0.01)
+    win.type_keys(message, with_spaces=True, pause=0.01)  # NOT send_keys() - that's global!
     time.sleep(0.3)
     
     # Press Enter unless --no-enter
     if not no_enter:
         print("Sending (Enter)...")
-        send_keys('{ENTER}')
+        win.type_keys('{ENTER}', pause=0.1)  # Window-scoped Enter
         time.sleep(0.5)
     else:
         print("Message typed (not sent - use --no-enter)")

@@ -109,9 +109,11 @@ def open_chat(
         Different modes/platforms may need adjustment.
     """
     try:
+        logger.warning(f"DEPRECATED: Using global send_keys for {keybinding}")
+        logger.warning("This sends to ACTIVE window, not target window!")
         logger.debug(f"Sending keybinding: {keybinding}")
         time.sleep(focus_delay_sec)  # Wait before sending
-        send_keys(keybinding)
+        send_keys(keybinding)  # GLOBAL - goes to active window (DANGEROUS)
         logger.info("Chat panel open command sent")
         time.sleep(open_delay_sec)  # Wait for panel to render
     except Exception as e:
@@ -120,13 +122,18 @@ def open_chat(
 
 
 def type_message(
+    window,
     message: str,
     char_delay_sec: float = 0.01,
     post_type_delay_sec: float = 0.3
 ) -> None:
-    """Type message into chat input (must be focused).
+    """Type message into chat input (WINDOW-SCOPED for safety).
+    
+    CRITICAL: This function now requires a window parameter to ensure
+    keyboard input goes to the TARGET window, not the active window.
     
     Args:
+        window: pywinauto window object (target window)
         message: Message text to type
         char_delay_sec: Delay between characters (default: 0.01s)
         post_type_delay_sec: Delay after typing completes (default: 0.3s)
@@ -136,7 +143,7 @@ def type_message(
     """
     try:
         logger.debug(f"Typing message: {len(message)} chars")
-        send_keys(message, with_spaces=True, pause=char_delay_sec)
+        window.type_keys(message, with_spaces=True, pause=char_delay_sec)
         logger.info(f"Message typed successfully")
         time.sleep(post_type_delay_sec)
     except Exception as e:
@@ -145,11 +152,15 @@ def type_message(
 
 
 def send_message(
+    window,
     post_send_delay_sec: float = 0.5
 ) -> None:
-    """Send message via Enter key.
+    """Send message via Enter key (WINDOW-SCOPED).
+    
+    CRITICAL: Requires window parameter to ensure Enter goes to target window.
     
     Args:
+        window: pywinauto window object (target window)
         post_send_delay_sec: Delay after pressing Enter (default: 0.5s)
         
     Raises:
@@ -157,7 +168,7 @@ def send_message(
     """
     try:
         logger.debug("Pressing Enter to send")
-        send_keys('{ENTER}')
+        window.type_keys('{ENTER}', pause=0.1)
         logger.info("Message sent")
         time.sleep(post_send_delay_sec)
     except Exception as e:
@@ -166,13 +177,17 @@ def send_message(
 
 
 def type_without_send(
+    window,
     message: str,
     char_delay_sec: float = 0.01,
     post_type_delay_sec: float = 0.3
 ) -> None:
-    """Type message into chat without pressing Enter (for defer-send scenarios).
+    """Type message into chat without pressing Enter (WINDOW-SCOPED).
+    
+    CRITICAL: Requires window parameter for safe keyboard targeting.
     
     Args:
+        window: pywinauto window object (target window)
         message: Message text to type
         char_delay_sec: Delay between characters (default: 0.01s)
         post_type_delay_sec: Delay after typing completes (default: 0.3s)
@@ -182,7 +197,7 @@ def type_without_send(
     """
     try:
         logger.debug(f"Typing message (no send): {len(message)} chars")
-        send_keys(message, with_spaces=True, pause=char_delay_sec)
+        window.type_keys(message, with_spaces=True, pause=char_delay_sec)
         logger.info(f"Message typed (awaiting send)")
         time.sleep(post_type_delay_sec)
     except Exception as e:
