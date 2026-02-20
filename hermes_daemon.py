@@ -133,26 +133,14 @@ def clear_pid():
 # VS Code window utilities
 # ─────────────────────────────────────────────────────────────────────────────
 
+from core.ui_automation.window_detection import find_vscode_windows as _core_find_windows
+
 def find_vscode_windows(pattern=None):
-    """Return list of {handle, title, window} for all matching VS Code windows."""
-    result = []
-    try:
-        handles = findwindows.find_windows(class_name=VSCODE_CLASS)
-        for handle in handles:
-            try:
-                app = Application(backend="uia").connect(handle=handle)
-                win = app.window(handle=handle)
-                title = win.window_text()
-                if "Visual Studio Code" not in title:
-                    continue
-                if pattern and pattern.lower() not in title.lower():
-                    continue
-                result.append({"handle": handle, "title": title, "window": win})
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return result
+    """Adapter: wraps core discovery, adds pattern filter, normalises to dict."""
+    windows = _core_find_windows()
+    if pattern:
+        windows = [w for w in windows if pattern.lower() in w.title.lower()]
+    return [{"handle": w.handle, "title": w.title, "window": None} for w in windows]
 
 
 def handle_is_alive(handle):

@@ -67,23 +67,14 @@ def safe_print(msg):
 # Window utilities
 # ─────────────────────────────────────────────────────────────────────────────
 
+from core.ui_automation.window_detection import find_vscode_windows as _core_find_windows
+
 def find_vscode_windows(pattern=None):
-    """Return list of dicts {window, title, handle} for all matching VS Code windows."""
-    handles = findwindows.find_windows(class_name=VSCODE_CLASS)
-    result = []
-    for handle in handles:
-        try:
-            app = Application(backend="uia").connect(handle=handle)
-            win = app.window(handle=handle)
-            title = win.window_text()
-            if "Visual Studio Code" not in title:
-                continue
-            if pattern and pattern.lower() not in title.lower():
-                continue
-            result.append({"window": win, "title": title, "handle": handle})
-        except Exception:
-            pass
-    return result
+    """Adapter: wraps core discovery, adds pattern filter, normalises to dict."""
+    windows = _core_find_windows()
+    if pattern:
+        windows = [w for w in windows if pattern.lower() in w.title.lower()]
+    return [{"handle": w.handle, "title": w.title, "window": None} for w in windows]
 
 
 def window_handle_alive(window):
