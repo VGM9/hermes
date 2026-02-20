@@ -1,0 +1,12 @@
+{
+  "_comment": "Hermes daemon trigger config. Edit to toggle behaviors without restarting the daemon.",
+  "triggers": {
+    "update_button": true,
+    "reload_dialog": true,
+    "wake_on_reload": true
+  },
+  "wake_msg": "Window reloaded. #qhoami",
+  "poll_interval": 0.8,
+  "window_pattern": "VGM9",
+  "wake_debounce_seconds": 10
+}
