@@ -35,12 +35,22 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_CONFIG = SCRIPT_DIR / "hermes_config.jsonc"
-VSCODE_CLASS = "Chrome_WidgetWin_1"
+LOG_FILE = SCRIPT_DIR / "hermes_daemon.log"
+
+
+def log(msg):
+    line = msg if msg.startswith("[hermes") else f"[hermes:wake] {msg}"
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+    print(line, flush=True)
 
 
 def load_config(path=DEFAULT_CONFIG):
     defaults = {
-        "wake_msg": "Window reloaded. #qhoami",
+        "wake_msg": "Window reloaded. qhoami",
         "window_pattern": "VGM9",
         "wake_timeout": 30,
     }
@@ -105,7 +115,10 @@ def _find_send_button(win):
 
 def send_wake_message(win, message):
     # Dismiss any open autocomplete/picker before typing.
-    win.type_keys("{ESCAPE}")
+    try:
+        win.type_keys("{ESC}")
+    except Exception:
+        pass
     time.sleep(0.1)
 
     escaped = (message
@@ -142,14 +155,15 @@ def main():
 
     win = windows[0]["window"]
     print(f"[hermes:wake] Waiting for chat ready (timeout={timeout}s)...")
+    log(f"Waiting for chat ready (timeout={timeout}s)...")
     chat = wait_for_chat_ready(win, timeout=timeout)
     if not chat:
-        print("[hermes:wake] Chat never ready — timeout exceeded")
+        log("Chat never ready — timeout exceeded")
         sys.exit(1)
 
-    print(f"[hermes:wake] Sending: '{message}'")
+    log(f"Sending: '{message}'")
     send_wake_message(win, message)
-    print("[hermes:wake] Done")
+    log("Done")
 
 
 if __name__ == "__main__":
