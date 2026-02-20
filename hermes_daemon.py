@@ -294,6 +294,41 @@ class DaemonState:
         self.last_update_click_time = 0.0  # debounce: don't click update button repeatedly
 
 
+def has_existing_session() -> bool:
+    """Return True if AppData contains at least one session with requests > 0.
+
+    Prevents wake from firing into an empty/new chat panel when the real
+    session is in a different window (e.g., popped out). Ground-truth check
+    via filesystem — no UI guesswork. See VSQode/hermes#5.
+    """
+    try:
+        from hermes_config import get_appdata_path
+        workspace_storage = get_appdata_path()
+        for hash_dir in workspace_storage.iterdir():
+            if not hash_dir.is_dir():
+                continue
+            sessions_dir = hash_dir / 'chatSessions'
+            if not sessions_dir.exists():
+                continue
+            for session_file in sessions_dir.glob('*.jsonl'):
+                try:
+                    last_line = None
+                    with open(session_file, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            last_line = line
+                    if last_line:
+                        data = json.loads(last_line)
+                        requests = data.get('v', {}).get('requests', [])
+                        if len(requests) > 0:
+                            return True
+                except Exception:
+                    continue
+    except Exception as e:
+        safe_print(f"[hermes] Session guard check failed: {e} — proceeding anyway")
+        return True  # fail open: if we can't check, don't block the wake
+    return False
+
+
 def poll_once(state, config, config_path):
     """One poll cycle. Mutates state. Hot-reloads config."""
     config = load_config(config_path)
@@ -315,20 +350,25 @@ def poll_once(state, config, config_path):
             state.woken_handles -= lost_handles  # gone handles no longer woken
 
         if state.reload_pending and current_handles:
-            unwoken = [w for w in windows if w["handle"] not in state.woken_handles]
-            for entry in unwoken:
-                win = entry["window"]
-                if win is None:
-                    continue
-                safe_print(f"[hermes] New window up — waiting for chat ready...")
-                chat = wait_for_chat_ready(win, timeout=30)
-                if chat:
-                    send_wake_message(win, config["wake_msg"])
-                    state.woken_handles.add(entry["handle"])
-                    state.reload_pending = False
-                else:
-                    safe_print("[hermes] Chat never ready — skipping wake")
-                break  # one window per poll cycle
+            # Guard: only fire if AppData shows a session with conversation history.
+            # Prevents waking into an empty panel when the real session is in another window.
+            if not has_existing_session():
+                safe_print("[hermes] No existing session found in AppData — skipping wake (empty window guard)")
+            else:
+                unwoken = [w for w in windows if w["handle"] not in state.woken_handles]
+                for entry in unwoken:
+                    win = entry["window"]
+                    if win is None:
+                        continue
+                    safe_print(f"[hermes] New window up — waiting for chat ready...")
+                    chat = wait_for_chat_ready(win, timeout=30)
+                    if chat:
+                        send_wake_message(win, config["wake_msg"])
+                        state.woken_handles.add(entry["handle"])
+                        state.reload_pending = False
+                    else:
+                        safe_print("[hermes] Chat never ready — skipping wake")
+                    break  # one window per poll cycle
 
     # ── Update button ──────────────────────────────────────────────────────
     if triggers.get("update_button") and windows:
