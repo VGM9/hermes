@@ -381,18 +381,18 @@ def main():
         safe_print(f"[hermes] Already running (PID {pid}) — exiting")
         return
 
-    # On Windows, daemonize by relaunching self as a detached process then exiting.
+    # Daemonize by relaunching self in a new session and exiting.
+    # Works on MSYS2/Windows: use `python3` from PATH + start_new_session.
     # The child writes its own PID file and runs the daemon loop.
     if "--detached" not in sys.argv:
         import subprocess
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
-        DETACHED_PROCESS = 0x00000008
         child = subprocess.Popen(
-            [sys.executable, __file__, "--detached", "--config", args.config],
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            ["python3", str(Path(__file__).resolve()), "--detached", "--config", args.config],
+            start_new_session=True,
             close_fds=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            cwd=str(SCRIPT_DIR),
         )
         safe_print(f"[hermes] Daemon started (PID {child.pid})")
         return
