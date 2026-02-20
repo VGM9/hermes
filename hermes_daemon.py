@@ -351,6 +351,7 @@ def main():
     parser = argparse.ArgumentParser(description="Hermes idempotent daemon")
     parser.add_argument("--ensure-running", action="store_true",
                         help="Start if not running, exit 0 if already running (default behavior)")
+    parser.add_argument("--detached", action="store_true", help=argparse.SUPPRESS)  # internal use
     parser.add_argument("--stop", action="store_true", help="Stop the running daemon")
     parser.add_argument("--status", action="store_true", help="Print daemon status")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG),
@@ -380,6 +381,23 @@ def main():
         safe_print(f"[hermes] Already running (PID {pid}) — exiting")
         return
 
+    # On Windows, daemonize by relaunching self as a detached process then exiting.
+    # The child writes its own PID file and runs the daemon loop.
+    if "--detached" not in sys.argv:
+        import subprocess
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        DETACHED_PROCESS = 0x00000008
+        child = subprocess.Popen(
+            [sys.executable, __file__, "--detached", "--config", args.config],
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        safe_print(f"[hermes] Daemon started (PID {child.pid})")
+        return
+
+    # Running as detached child — own the daemon loop
     write_pid()
     try:
         run_daemon(args.config)
