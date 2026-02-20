@@ -408,17 +408,27 @@ def trigger_autopulse(state, config, windows):
     hermes_prefix = autopulse.get("hermes_prefix", "[hermes]")
     session_jsonl = autopulse.get("session_jsonl", "")
     pulse_message = autopulse.get("message", "[hermes] pulse — user away. status: alive?")
+    # departure flag: explicit "I'm leaving" signal from hermes:depart VS Code task
+    flag_path = SCRIPT_DIR / "hermes_user_away.flag"
+    flag_present = flag_path.exists()
 
     now = time.time()
 
-    # Check user idle state
-    if session_jsonl:
+    # Check user idle state: departure flag (explicit) OR JSONL idle detection (passive).
+    # Flag present = user explicitly said they're leaving → always idle.
+    # Flag absent + session configured = check the JSONL timestamp.
+    # Flag absent + no session = assume idle (no way to detect user presence).
+    if flag_present:
+        user_is_idle = True
+        user_age = float("inf")
+        last_human_msg = ""
+    elif session_jsonl:
         last_human_ts, last_human_msg = _get_last_human_message_time(session_jsonl, hermes_prefix)
         user_age = now - last_human_ts if last_human_ts else float("inf")
         user_is_idle = user_age > idle_threshold
     else:
-        # No session configured — assume idle (no way to detect user presence)
         user_is_idle = True
+        user_age = float("inf")
         last_human_msg = ""
 
     if not user_is_idle:
