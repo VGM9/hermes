@@ -63,7 +63,7 @@ function hermesTasksFor(workspaceRoot) {
       options: { cwd },
       isBackground: true,
       runOptions: { runOn: 'folderOpen' },
-      presentation: { reveal: 'silent', panel: 'shared' },
+      presentation: { reveal: 'silent', panel: 'dedicated', close: true },
     },
     {
       label: 'hermes:wake',
@@ -71,7 +71,7 @@ function hermesTasksFor(workspaceRoot) {
       type: 'shell', command: 'npm', args: ['run', 'wake'],
       options: { cwd },
       runOptions: { runOn: 'folderOpen' },
-      presentation: { reveal: 'silent', panel: 'shared' },
+      presentation: { reveal: 'silent', panel: 'dedicated', close: true },
     },
     {
       label: 'hermes:detect-update',

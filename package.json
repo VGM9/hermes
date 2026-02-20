@@ -12,9 +12,12 @@
     "daemon:stop":    "python3 ./hermes_daemon.py --stop",
     "daemon:status":  "python3 ./hermes_daemon.py --status",
     "wake":           "python3 ./hermes_wake.py",
+    "deploy-tasks":   "node ./install-tasks.js",
+    "postinstall":    "node ./install-tasks.js",
     "reload:phase2":  "python3 ./reload_and_wake.py --phases 2",
     "update:detect":  "python3 ./reload_and_wake.py --phases 0 --detect-only",
-    "update:apply":   "python3 ./reload_and_wake.py --phases 0,2"
+    "update:apply":   "python3 ./reload_and_wake.py --phases 0,2",
+    "terminals:kill-all": "node -e \"const {execSync}=require('child_process'); execSync('code-insiders --command workbench.action.terminal.killAll', {stdio:'inherit'})\" || echo 'use qopilot_execute_command(workbench.action.terminal.killAll) from agent'"
   },
   "keywords": ["vscode", "copilot", "hermes", "inter-agent", "messaging"],
   "author": "ALTAIR/9 (0.0.Q)",
