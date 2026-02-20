@@ -158,6 +158,7 @@ def clear_pid():
 # ─────────────────────────────────────────────────────────────────────────────
 
 from core.ui_automation.window_detection import find_vscode_windows as _core_find_windows
+from core.ui_automation.window_detection import find_agent_mode_in_window
 
 def find_vscode_windows(pattern=None):
     """Adapter: wraps core discovery, adds pattern filter, normalises to dict.
@@ -313,9 +314,45 @@ def poll_once(state, config, config_path):
     config = load_config(config_path)
     triggers = config["triggers"]
     pattern = config.get("window_pattern")
+    agent_mode = config.get("agent_mode", "").strip()
 
     windows = find_vscode_windows(pattern)
 
+    # ── Agent mode filter (VGM9/hermes#5) ────────────────────────────────────
+    # If agent_mode is configured, only act on windows containing that agent's
+    # chat pane. This prevents polling / acting on the wrong window in
+    # multi-window multi-agent deployments.
+    # Without this filter, walking a non-target window's descendants fires
+    # AutomationFocusChangedEvent and steals focus from the user.
+    if agent_mode and windows:
+        matched = []
+        for entry in windows:
+            win = entry["window"]
+            if win is None:
+                continue
+            mode = find_agent_mode_in_window(win)
+            if mode and mode.lower() == agent_mode.lower():
+                matched.append(entry)
+        if matched:
+            windows = matched
+        else:
+            # No window matches yet — either loading or agent_mode wrong.
+            # Skip this cycle entirely rather than acting on random windows.
+            return config
+
+    # ── Foreground window exclusion ──────────────────────────────────────────
+    # Never walk descendants of the window the user is actively using.
+    # Walking any non-foreground window fires AutomationFocusChangedEvent.
+    # With agent_mode filtering above, this is belt-and-suspenders protection.
+    try:
+        import win32gui
+        focused_handle = win32gui.GetForegroundWindow()
+        windows = [w for w in windows if w["handle"] != focused_handle]
+    except Exception:
+        pass  # win32gui unavailable — skip guard, agent_mode filter is sufficient
+
+    if not windows:
+        return config  # all candidate windows are foreground — skip
     # ── Update button ──────────────────────────────────────────────────────
     if triggers.get("update_button") and windows:
         update_debounce = config.get("update_click_debounce_seconds", 30)

@@ -21,6 +21,33 @@ from vscode_ground_truth import (
 from core.data_models.approval_request import WindowInfo
 
 
+def find_agent_mode_in_window(win) -> Optional[str]:
+    """Return the active agent mode name for a VS Code chat window, or None.
+
+    VS Code renders a 'Set Agent (Ctrl+.) - AGENTNAME' button in the chat
+    input row. This is the only stable, per-window identifier for which
+    agent session is active in a given window.
+
+    Confirmed via UIA probe 2026-02-20:
+      Main window POLARIS1:  'Set Agent (Ctrl+.) - POLARIS1'
+      Floating POLARIS3:     'Set Agent (Ctrl+.) - POLARIS3'
+
+    Args:
+        win: pywinauto window object (Application(backend='uia').window(...))
+
+    Returns:
+        Agent name string (e.g. 'POLARIS1') or None if not found.
+    """
+    try:
+        for btn in win.descendants(control_type="Button"):
+            name = (btn.element_info.name or "").strip()
+            if name.startswith("Set Agent") and " - " in name:
+                return name.split(" - ", 1)[1].strip()
+    except Exception:
+        pass
+    return None
+
+
 def find_vscode_windows() -> List[WindowInfo]:
     """
     Find all VSCode windows currently open.

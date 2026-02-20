@@ -157,6 +157,27 @@ def wait_for_chat_ready(win, timeout=30):
 _SEND_BUTTON_NAMES = {"send", "send message", "submit"}
 
 
+def find_agent_mode_in_window(win):
+    """Return the active agent mode name for a VS Code chat window, or None.
+
+    VS Code renders a 'Set Agent (Ctrl+.) - AGENTNAME' button in the chat
+    input row (immediately around the text input area). This is the only
+    stable, per-window identifier for which agent session is active.
+
+    Confirmed via UIA probe 2026-02-20:
+      Main window POLARIS1: [1076,75] 'Set Agent (Ctrl+.) - POLARIS1'
+      Floating POLARIS3:    [1796,-973] 'Set Agent (Ctrl+.) - POLARIS3'
+
+    The button is NOT in the status bar — it lives in the chat panel input
+    row, which means it survives across topology changes (sidebar vs popout).
+    """
+    for btn in win.descendants(control_type="Button"):
+        name = (btn.element_info.name or "").strip()
+        if name.startswith("Set Agent") and " - " in name:
+            return name.split(" - ", 1)[1].strip()
+    return None
+
+
 def _find_send_button(win):
     """Return the Send button control, or None."""
     for btn in win.descendants(control_type="Button"):
@@ -218,21 +239,30 @@ def _count_chat_text_elements(win, cap=60) -> int:
         return 0
 
 
-def _select_wake_window(windows, short_timeout=3):
-    """Select the VS Code window most likely to contain an active session.
+def _select_wake_window(windows, agent_mode=None, short_timeout=3):
+    """Select the VS Code window that contains the expected agent session.
 
-    With a single window, returns it immediately. With multiple windows
-    (e.g. main workspace window + popped-out chat panel), uses a
-    Text-element count heuristic: the window with the most Text controls
-    is treated as the active session, because it has conversation history
-    while a freshly reloaded window has an empty chat panel.
-
-    Falls back to windows[0] if no window's chat becomes ready within
-    short_timeout seconds. See VSQode/hermes#5.
+    Strategy (in priority order):
+    1. If agent_mode is configured: find window whose 'Set Agent' button
+       matches that mode exactly. This is the reliable per-window anchor.
+       See find_agent_mode_in_window() and VGM9/hermes#5.
+    2. Fallback (agent_mode not set): use Text-element count heuristic —
+       the window with the most Text controls is the active session.
+    3. Last resort: windows[0].
     """
     if len(windows) <= 1:
         return windows[0]["window"]
 
+    if agent_mode:
+        for entry in windows:
+            win = entry["window"]
+            mode = find_agent_mode_in_window(win)
+            if mode and mode.lower() == agent_mode.lower():
+                log(f"Agent mode match: '{mode}' in window '{entry['title'][:60]}'")
+                return win
+        log(f"No window with agent_mode='{agent_mode}' found — falling back to text-count heuristic")
+
+    # Fallback: text element count heuristic (original behavior for unconfigured state)
     best_win = None
     best_score = -1
     for entry in windows:
@@ -293,9 +323,8 @@ def _wake(args):
         log(f"No VS Code window matching '{pattern}' — giving up")
         sys.exit(1)
 
-    # Prefer the window with an active session when multiple windows exist
-    # (e.g. reloaded main window + popped-out chat panel). See VSQode/hermes#5.
-    win = _select_wake_window(windows)
+    agent_mode = config.get("agent_mode", "").strip()
+    win = _select_wake_window(windows, agent_mode=agent_mode or None)
     log(f"Waiting for chat ready (timeout={timeout}s)...")
 
     try:
