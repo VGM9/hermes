@@ -8,9 +8,12 @@ on configured triggers without human intervention.
 
 Triggers (all toggled via hermes_config.json, hot-reloaded each poll cycle):
 
-  update_button   — Detect and click VS Code "Update is ready" status bar button
-  reload_dialog   — Detect and click "A chat request is in progress" cancel dialog
-  wake_on_reload  — Detect window reload/restart, wait for chat, send wake message
+  update_button      — Detect and click VS Code "Update is ready" status bar button
+  reload_dialog      — Detect and click "A chat request is in progress" cancel dialog
+  chat_timeout_restart — Click retry when Copilot reports "Chat took too long to get ready"
+
+Wake-on-reload is handled by hermes_wake.py, invoked by the VS Code
+folderOpen task. This daemon no longer manages wake state.
 
 Idempotency: writes a PID file on start. Subsequent launches check the PID file;
 if the process is alive they exit 0 immediately. The folderOpen VS Code task calls
@@ -282,98 +285,12 @@ def trigger_chat_timeout_restart(windows):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trigger: wake on reload
-# ─────────────────────────────────────────────────────────────────────────────
-
-def wait_for_chat_ready(window, timeout=45):
-    """Wait until chat Edit control is visible and enabled.
-
-    Sends as soon as the input is interactable. If Copilot extension isn't
-    connected yet, the send will fail with a timeout error — the
-    trigger_chat_timeout_restart trigger handles recovery automatically.
-    """
-    end = time.time() + timeout
-    while time.time() < end:
-        try:
-            for edit in window.descendants(control_type="Edit"):
-                name = (edit.element_info.name or "").lower()
-                cls = edit.element_info.class_name or ""
-                if "chat input" in name or cls == "native-edit-context":
-                    if edit.is_visible() and edit.is_enabled():
-                        try:
-                            edit.click_input()
-                            return edit
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-        time.sleep(0.5)
-    return None
-
-
-def send_wake_message(window, message):
-    """Type and send wake message into the focused chat input."""
-    try:
-        escaped = (message
-                   .replace("{", "{{").replace("}", "}}")
-                   .replace("+", "{+}").replace("^", "{^}")
-                   .replace("%", "{%}").replace("~", "{~}"))
-        window.type_keys(escaped, with_spaces=True, pause=0.02)
-        time.sleep(0.3)
-        window.type_keys("{ENTER}")
-        safe_print(f"[hermes] Wake message sent: '{message}'")
-        return True
-    except Exception as e:
-        safe_print(f"[hermes] Wake message failed: {e}")
-        return False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Poll loop state and main loop
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DaemonState:
     def __init__(self):
-        self.known_handles = set()
-        self.reload_pending = False       # a reload was detected (handles disappeared)
-        self.wake_sent = False            # wake message was sent; retry handler is active until chat responds
-        self.woken_handles = set()        # handles already woken — never re-wake the same handle
         self.last_update_click_time = 0.0  # debounce: don't click update button repeatedly
-
-
-def has_existing_session() -> bool:
-    """Return True if AppData contains at least one session with requests > 0.
-
-    Prevents wake from firing into an empty/new chat panel when the real
-    session is in a different window (e.g., popped out). Ground-truth check
-    via filesystem — no UI guesswork. See VSQode/hermes#5.
-    """
-    try:
-        from hermes_config import get_appdata_path
-        workspace_storage = get_appdata_path()
-        for hash_dir in workspace_storage.iterdir():
-            if not hash_dir.is_dir():
-                continue
-            sessions_dir = hash_dir / 'chatSessions'
-            if not sessions_dir.exists():
-                continue
-            for session_file in sessions_dir.glob('*.jsonl'):
-                try:
-                    last_line = None
-                    with open(session_file, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            last_line = line
-                    if last_line:
-                        data = json.loads(last_line)
-                        requests = data.get('v', {}).get('requests', [])
-                        if len(requests) > 0:
-                            return True
-                except Exception:
-                    continue
-    except Exception as e:
-        safe_print(f"[hermes] Session guard check failed: {e} — proceeding anyway")
-        return True  # fail open: if we can't check, don't block the wake
-    return False
 
 
 def poll_once(state, config, config_path):
@@ -383,48 +300,12 @@ def poll_once(state, config, config_path):
     pattern = config.get("window_pattern")
 
     windows = find_vscode_windows(pattern)
-    current_handles = {w["handle"] for w in windows}
-
-    # ── Wake-on-reload detection ────────────────────────────────────────────────
-    # Event-driven: fires ONCE per new handle, only after a reload_pending event.
-    # woken_handles guarantees no re-fire on the same handle.
-    if triggers.get("wake_on_reload"):
-        lost_handles = state.known_handles - current_handles
-
-        if lost_handles:
-            safe_print(f"[hermes] Detected window exit — reload pending")
-            state.reload_pending = True
-            state.woken_handles -= lost_handles  # gone handles no longer woken
-
-        if state.reload_pending and current_handles:
-            # Guard: only fire if AppData shows a session with conversation history.
-            # Prevents waking into an empty panel when the real session is in another window.
-            if not has_existing_session():
-                safe_print("[hermes] No existing session found in AppData — skipping wake (empty window guard)")
-            else:
-                unwoken = [w for w in windows if w["handle"] not in state.woken_handles]
-                for entry in unwoken:
-                    win = entry["window"]
-                    if win is None:
-                        continue
-                    safe_print(f"[hermes] New window up — waiting for chat ready...")
-                    chat = wait_for_chat_ready(win, timeout=30)
-                    if chat:
-                        send_wake_message(win, config["wake_msg"])
-                        state.woken_handles.add(entry["handle"])
-                        state.reload_pending = False
-                        state.wake_sent = True  # retry handler now active
-                    else:
-                        safe_print("[hermes] Chat never ready — skipping wake")
-                    break  # one window per poll cycle
 
     # ── Update button ──────────────────────────────────────────────────────
     if triggers.get("update_button") and windows:
         update_debounce = config.get("update_click_debounce_seconds", 30)
         if time.time() - state.last_update_click_time > update_debounce:
-            clicked = trigger_update_button(windows)
-            if clicked:
-                state.reload_pending = True  # update restart coming
+            if trigger_update_button(windows):
                 state.last_update_click_time = time.time()
 
     # ── Reload dialog ────────────────────────────────────────────────────────
@@ -432,13 +313,12 @@ def poll_once(state, config, config_path):
         trigger_reload_dialog(windows)
 
     # ── Chat timeout Restart ─────────────────────────────────────────────────
-    # Active only after wake_sent — prevents clicking Regenerate on normal responses.
-    # Clears wake_sent on success, so retries stop once the error is resolved.
-    if triggers.get("chat_timeout_restart", True) and windows and state.wake_sent:
-        if trigger_chat_timeout_restart(windows):
-            state.wake_sent = False
+    # Text-gated: only fires when "Chat took too long to get ready" is visible.
+    # hermes_wake.py (folderOpen task) sends the initial wake message;
+    # this picks up the error if Copilot wasn't ready yet.
+    if triggers.get("chat_timeout_restart", True) and windows:
+        trigger_chat_timeout_restart(windows)
 
-    state.known_handles = current_handles
     return config  # return hot-reloaded config for next interval
 
 
@@ -449,8 +329,6 @@ def run_daemon(config_path):
 
     config = load_config(config_path)
     state = DaemonState()
-    # Warm up known handles without triggering wake
-    state.known_handles = {w["handle"] for w in find_vscode_windows(config.get("window_pattern"))}
 
     def _shutdown(sig, frame):
         safe_print("[hermes] Shutting down")

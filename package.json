@@ -11,6 +11,7 @@
     "daemon:ensure":  "python3 ./hermes_daemon.py --ensure-running --detach",
     "daemon:stop":    "python3 ./hermes_daemon.py --stop",
     "daemon:status":  "python3 ./hermes_daemon.py --status",
+    "wake":           "python3 ./hermes_wake.py",
     "reload:phase2":  "python3 ./reload_and_wake.py --phases 2",
     "update:detect":  "python3 ./reload_and_wake.py --phases 0 --detect-only",
     "update:apply":   "python3 ./reload_and_wake.py --phases 0,2"
