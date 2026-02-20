@@ -33,6 +33,7 @@ import sys
 import os
 import time
 import json
+import copy
 import signal
 import argparse
 import subprocess
@@ -307,6 +308,169 @@ def trigger_chat_timeout_restart(windows):
 class DaemonState:
     def __init__(self):
         self.last_update_click_time = 0.0  # debounce: don't click update button repeatedly
+        self.last_pulse_time = 0.0         # autopulse: last time we sent a pulse
+        self.pulse_paused = False           # autopulse: paused because user is active
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Autopulse: user idle detection + periodic keep-alive
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_last_human_message_time(session_jsonl_path: str, hermes_prefix: str = "[hermes]"):
+    """Return (timestamp_seconds, message_text) of the most recent genuine human message.
+
+    Parses the JSONL mutation log format used by VS Code Insiders (v1.109+).
+    A "genuine human message" is a user turn whose message text does NOT start
+    with the hermes_prefix — meaning it was typed by the human, not injected by hermes.
+
+    Returns (0.0, "") if no matching message is found or on any parse error.
+    """
+    try:
+        path = Path(session_jsonl_path)
+        if not path.exists():
+            return 0.0, ""
+
+        lines = path.read_bytes().decode("utf-8", "replace").splitlines()
+        if not lines:
+            return 0.0, ""
+
+        # Reconstruct requests from JSONL mutation log
+        import copy
+        snap = json.loads(lines[0])
+        reqs = {i: copy.deepcopy(r) for i, r in enumerate(snap.get("v", {}).get("requests", [])) if r}
+        nxt = len(reqs)
+        for raw in lines[1:]:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                continue
+            kind, keys, val = obj.get("kind"), obj.get("k", []), obj.get("v")
+            if kind == 2 and keys == ["requests"] and isinstance(val, list):
+                for r in val:
+                    if isinstance(r, dict):
+                        reqs[nxt] = r
+                        nxt += 1
+                continue
+            if kind not in (1, 2) or len(keys) < 3 or keys[0] != "requests":
+                continue
+            ri, field = keys[1], keys[2]
+            if ri not in reqs:
+                reqs[ri] = {}
+            if kind == 1:
+                reqs[ri][field] = val
+            elif kind == 2 and field == "response" and isinstance(val, list):
+                reqs[ri].setdefault("response", []).extend(val)
+
+        # Walk requests from most recent to oldest
+        for i in sorted(reqs.keys(), reverse=True):
+            req = reqs[i]
+            msg_text = req.get("message", "")
+            if not msg_text:
+                continue
+            # Skip hermes-injected messages
+            if str(msg_text).startswith(hermes_prefix):
+                continue
+            # This is a genuine human message — extract timestamp
+            ts_ms = req.get("timestamp", 0)
+            if ts_ms:
+                return ts_ms / 1000.0, str(msg_text)
+            # Fallback: use file mtime if no timestamp in record
+            return path.stat().st_mtime, str(msg_text)
+
+        return 0.0, ""
+    except Exception as e:
+        safe_print(f"[hermes] idle-detect error: {e}")
+        return 0.0, ""
+
+
+def trigger_autopulse(state, config, windows):
+    """Send periodic pulse message to keep agent alive when user is idle.
+
+    User idle = most recent genuine human message is older than
+    user_idle_threshold_seconds. When user returns (fresh human message),
+    pulses pause until next idle window.
+
+    The pulse is delivered by spawning hermes_wake.py --message --no-brief,
+    which inherits the same agent_mode filter and lock serialization.
+
+    Uses VS Code's new "steering" capability (2026-02-20): if the agent is
+    mid-response, the message queues instead of interrupting.
+    """
+    autopulse = config.get("autopulse", {})
+    if not autopulse.get("enabled", False):
+        return False
+
+    interval = float(autopulse.get("interval_seconds", 300))
+    idle_threshold = float(autopulse.get("user_idle_threshold_seconds", 120))
+    hermes_prefix = autopulse.get("hermes_prefix", "[hermes]")
+    session_jsonl = autopulse.get("session_jsonl", "")
+    pulse_message = autopulse.get("message", "[hermes] pulse — user away. status: alive?")
+
+    now = time.time()
+
+    # Check user idle state
+    if session_jsonl:
+        last_human_ts, last_human_msg = _get_last_human_message_time(session_jsonl, hermes_prefix)
+        user_age = now - last_human_ts if last_human_ts else float("inf")
+        user_is_idle = user_age > idle_threshold
+    else:
+        # No session configured — assume idle (no way to detect user presence)
+        user_is_idle = True
+        last_human_msg = ""
+
+    if not user_is_idle:
+        # User is active — pause/reset pulse, don't send
+        if state.pulse_paused is False:
+            safe_print(f"[hermes] autopulse: user active (last msg {user_age:.0f}s ago) — pausing")
+        state.pulse_paused = True
+        state.last_pulse_time = now  # reset so pulse doesn't fire immediately on next idle window
+        return False
+
+    if state.pulse_paused:
+        safe_print("[hermes] autopulse: user now idle — resuming pulse schedule")
+        state.pulse_paused = False
+
+    # Check if interval has elapsed since last pulse
+    elapsed = now - state.last_pulse_time
+    if elapsed < interval:
+        return False
+
+    # Craft pulse message — include radio check-in prompt for the agent
+    from datetime import datetime, timezone
+    ts_str = datetime.now(timezone.utc).strftime("%H:%MZ")
+    pulse_num = int(elapsed // interval) if state.last_pulse_time > 0 else 1
+    full_message = (
+        f"{pulse_message}\n"
+        f"[{ts_str}] pulse #{pulse_num}. "
+        f"User victorbargains is away. Keep yourself alive. "
+        f"Check in with POLARIS3 via runSubagent if useful. "
+        f"Resume full-otto when user returns."
+    )
+
+    # Spawn hermes_wake.py to deliver — inherits agent_mode filter + lock
+    wake_script = SCRIPT_DIR / "hermes_wake.py"
+    config_path = SCRIPT_DIR / "hermes_config.jsonc"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(wake_script),
+             "--config", str(config_path),
+             "--message", full_message,
+             "--no-brief"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60
+        )
+        if result.returncode == 0:
+            safe_print(f"[hermes] autopulse sent: pulse #{pulse_num}")
+            state.last_pulse_time = now
+            return True
+        else:
+            safe_print(f"[hermes] autopulse failed (rc={result.returncode}): {result.stderr[:200]}")
+    except Exception as e:
+        safe_print(f"[hermes] autopulse exception: {e}")
+    return False
 
 
 def poll_once(state, config, config_path):
@@ -370,6 +534,13 @@ def poll_once(state, config, config_path):
     # this picks up the error if Copilot wasn't ready yet.
     if triggers.get("chat_timeout_restart", True) and windows:
         trigger_chat_timeout_restart(windows)
+
+    # ── Autopulse ───────────────────────────────────────────────────────
+    # Periodic keep-alive nudge when user victorbargains is away.
+    # Pauses automatically when a genuine human message is detected.
+    # Uses VS Code steering (2026-02-20) to queue if agent is mid-response.
+    if config.get("autopulse", {}).get("enabled") and windows:
+        trigger_autopulse(state, config, windows)
 
     return config  # return hot-reloaded config for next interval
 

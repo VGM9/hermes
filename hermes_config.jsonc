@@ -4,10 +4,27 @@
     "update_button": true,
     "reload_dialog": true,
     "wake_on_reload": true,
-    "chat_timeout_restart": true
+    "chat_timeout_restart": false
   },
   "wake_msg": "Window reloaded. qhoami",
   "poll_interval": 0.8,
   "window_pattern": "",
-  "wake_debounce_seconds": 10
+  "wake_debounce_seconds": 10,
+  "autopulse": {
+    // Periodic keep-alive nudge when user victorbargains is away.
+    // Disabled by default — enable per-workspace in hermes_config.local.jsonc.
+    "enabled": false,
+    // How long between pulses (seconds). 180 = every 3 minutes.
+    "interval_seconds": 300,
+    // How long since last genuine human message before user is considered idle.
+    // hermes-injected messages ([hermes] prefix) do NOT reset this timer.
+    "user_idle_threshold_seconds": 120,
+    // Prefix used to tag hermes-injected messages (must match wake_msg prefix).
+    "hermes_prefix": "[hermes]",
+    // Path to the agent's session JSONL file. Required for user-idle detection.
+    // Set in hermes_config.local.jsonc — leave empty here.
+    "session_jsonl": "",
+    // The pulse message delivered to the agent's chat input.
+    "message": "[hermes] pulse — user away. status: alive?"
+  }
 }

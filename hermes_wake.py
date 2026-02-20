@@ -286,6 +286,10 @@ def main():
     parser = argparse.ArgumentParser(description="Hermes one-shot post-reload wake")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG),
                         help=f"Path to config JSONC (default: {DEFAULT_CONFIG})")
+    parser.add_argument("--message", default=None,
+                        help="Override wake message from config (used by autopulse)")
+    parser.add_argument("--no-brief", action="store_true",
+                        help="Skip appending wake.py --brief status line")
     args = parser.parse_args()
 
     if not _acquire_wake_lock():
@@ -302,10 +306,10 @@ def _wake(args):
     config = load_config(args.config)
     pattern = config.get("window_pattern")
     timeout = int(config.get("wake_timeout", 30))
-    message = config["wake_msg"]
+    message = args.message if args.message else config["wake_msg"]
 
-    # Append wake.py --brief status line if available
-    if WAKE_PY.exists():
+    # Append wake.py --brief status line if available (skip if --no-brief or --message override)
+    if not args.no_brief and not args.message and WAKE_PY.exists():
         try:
             r = subprocess.run(
                 [sys.executable, str(WAKE_PY), "--brief"],
