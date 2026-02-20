@@ -144,11 +144,23 @@ def clear_pid():
 from core.ui_automation.window_detection import find_vscode_windows as _core_find_windows
 
 def find_vscode_windows(pattern=None):
-    """Adapter: wraps core discovery, adds pattern filter, normalises to dict."""
+    """Adapter: wraps core discovery, adds pattern filter, normalises to dict.
+    
+    Connects each discovered handle to a pywinauto window object so trigger
+    functions can call .descendants() and .click_input() on them.
+    """
     windows = _core_find_windows()
     if pattern:
         windows = [w for w in windows if pattern.lower() in w.title.lower()]
-    return [{"handle": w.handle, "title": w.title, "window": None} for w in windows]
+    result = []
+    for w in windows:
+        try:
+            app = Application(backend="uia").connect(handle=w.handle)
+            win_obj = app.window(handle=w.handle)
+            result.append({"handle": w.handle, "title": w.title, "window": win_obj})
+        except Exception:
+            result.append({"handle": w.handle, "title": w.title, "window": None})
+    return result
 
 
 def handle_is_alive(handle):
@@ -168,6 +180,8 @@ def scan_for_update_button(windows):
     """Return first matching update/restart status bar element, or None."""
     for entry in windows:
         win = entry["window"]
+        if win is None:
+            continue
         try:
             for ctrl_type in ("Button", "MenuItem", "Custom", "Text"):
                 for elem in win.descendants(control_type=ctrl_type):
@@ -204,6 +218,8 @@ def trigger_reload_dialog(windows):
     """Find and click Yes/Reload on the 'chat request in progress' dialog. Returns True if clicked."""
     for entry in windows:
         win = entry["window"]
+        if win is None:
+            continue
         try:
             descendants = win.descendants()
             texts = [d.window_text().lower() for d in descendants if d.window_text()]
@@ -271,8 +287,9 @@ def send_wake_message(window, message):
 class DaemonState:
     def __init__(self):
         self.known_handles = set()
-        self.reload_in_progress = False   # True once we see a handle disappear
-        self.last_wake_time = 0.0
+        self.reload_pending = False       # a reload was detected (handles disappeared)
+        self.woken_handles = set()        # handles already woken — never re-wake the same handle
+        self.last_update_click_time = 0.0  # debounce: don't click update button repeatedly
 
 
 def poll_once(state, config, config_path):
@@ -284,35 +301,41 @@ def poll_once(state, config, config_path):
     windows = find_vscode_windows(pattern)
     current_handles = {w["handle"] for w in windows}
 
-    # ── Wake-on-reload detection ────────────────────────────────────────────
+    # ── Wake-on-reload detection ────────────────────────────────────────────────
+    # Event-driven: fires ONCE per new handle, only after a reload_pending event.
+    # woken_handles guarantees no re-fire on the same handle.
     if triggers.get("wake_on_reload"):
-        debounce = config.get("wake_debounce_seconds", 10)
         lost_handles = state.known_handles - current_handles
 
-        if lost_handles and not state.reload_in_progress:
-            safe_print(f"[hermes] Detected window exit — reload in progress")
-            state.reload_in_progress = True
+        if lost_handles:
+            safe_print(f"[hermes] Detected window exit — reload pending")
+            state.reload_pending = True
+            state.woken_handles -= lost_handles  # gone handles no longer woken
 
-        if state.reload_in_progress and current_handles:
-            # New window appeared after a reload
-            if time.time() - state.last_wake_time > debounce:
-                new_windows = [w for w in windows if w["handle"] not in state.known_handles]
-                target = new_windows[0] if new_windows else windows[0]
-                win = target["window"]
+        if state.reload_pending and current_handles:
+            unwoken = [w for w in windows if w["handle"] not in state.woken_handles]
+            for entry in unwoken:
+                win = entry["window"]
+                if win is None:
+                    continue
                 safe_print(f"[hermes] New window up — waiting for chat ready...")
                 chat = wait_for_chat_ready(win, timeout=30)
                 if chat:
                     send_wake_message(win, config["wake_msg"])
-                    state.last_wake_time = time.time()
+                    state.woken_handles.add(entry["handle"])
+                    state.reload_pending = False
                 else:
                     safe_print("[hermes] Chat never ready — skipping wake")
-            state.reload_in_progress = False
+                break  # one window per poll cycle
 
-    # ── Update button ────────────────────────────────────────────────────────
+    # ── Update button ──────────────────────────────────────────────────────
     if triggers.get("update_button") and windows:
-        clicked = trigger_update_button(windows)
-        if clicked:
-            state.reload_in_progress = True  # update restart coming
+        update_debounce = config.get("update_click_debounce_seconds", 30)
+        if time.time() - state.last_update_click_time > update_debounce:
+            clicked = trigger_update_button(windows)
+            if clicked:
+                state.reload_pending = True  # update restart coming
+                state.last_update_click_time = time.time()
 
     # ── Reload dialog ────────────────────────────────────────────────────────
     if triggers.get("reload_dialog") and windows:
