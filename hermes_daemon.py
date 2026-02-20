@@ -32,6 +32,7 @@ import time
 import json
 import signal
 import argparse
+import subprocess
 from pathlib import Path
 
 try:
@@ -46,6 +47,7 @@ SCRIPT_DIR = Path(__file__).parent
 DEFAULT_CONFIG = SCRIPT_DIR / "hermes_config.jsonc"
 PID_FILE = SCRIPT_DIR / "hermes_daemon.pid"
 VSCODE_CLASS = "Chrome_WidgetWin_1"
+DETACHED_PROCESS = 0x00000008  # Windows: detach child from parent console
 
 _UPDATE_BUTTON_FRAGMENTS = [
     "update available",
@@ -379,6 +381,8 @@ def main():
     parser = argparse.ArgumentParser(description="Hermes idempotent daemon")
     parser.add_argument("--ensure-running", action="store_true",
                         help="Start if not running, exit 0 if already running (default behavior)")
+    parser.add_argument("--detach", action="store_true",
+                        help="Self-daemonize via DETACHED_PROCESS spawn (works in cmd.exe / any shell)")
     parser.add_argument("--stop", action="store_true", help="Stop the running daemon")
     parser.add_argument("--status", action="store_true", help="Print daemon status")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG),
@@ -407,6 +411,22 @@ def main():
     # Backgrounding is the caller's job (VS Code task, run_in_terminal isBackground=true).
     if alive:
         safe_print(f"[hermes] Already running (PID {pid}) — exiting")
+        return
+
+    if getattr(args, "detach", False):
+        # Spawn self without --detach as a detached background process.
+        # Works from any shell (cmd.exe, powershell, bash) — no nohup/& needed.
+        log_path = SCRIPT_DIR / "hermes_daemon.log"
+        with open(log_path, "a", encoding="utf-8") as log_f:
+            child = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "--config", args.config],
+                creationflags=DETACHED_PROCESS,
+                close_fds=True,
+                stdout=log_f,
+                stderr=log_f,
+                stdin=subprocess.DEVNULL,
+            )
+        safe_print(f"[hermes] Detached daemon PID {child.pid} (child will self-register)")
         return
 
     write_pid()
