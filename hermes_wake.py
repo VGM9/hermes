@@ -22,6 +22,7 @@ Usage:
 """
 
 import sys
+import os
 import time
 import json
 import argparse
@@ -37,6 +38,33 @@ SCRIPT_DIR = Path(__file__).parent
 DEFAULT_CONFIG = SCRIPT_DIR / "hermes_config.jsonc"
 LOG_FILE = SCRIPT_DIR / "hermes_daemon.log"
 VSCODE_CLASS = "Chrome_WidgetWin_1"
+WAKE_LOCK_FILE = SCRIPT_DIR / "hermes_wake.lock"
+
+
+def _acquire_wake_lock():
+    """Write our PID to the lock file. Return True if we got the lock,
+    False if another wake instance is already running.
+    """
+    if WAKE_LOCK_FILE.exists():
+        try:
+            other_pid = int(WAKE_LOCK_FILE.read_text().strip())
+            # Check if that process is still alive
+            try:
+                os.kill(other_pid, 0)
+                return False  # alive — another wake is running
+            except (ProcessLookupError, PermissionError):
+                pass  # process gone — stale lock, take it
+        except Exception:
+            pass  # unreadable lock — take it
+    WAKE_LOCK_FILE.write_text(str(os.getpid()))
+    return True
+
+
+def _release_wake_lock():
+    try:
+        WAKE_LOCK_FILE.unlink()
+    except Exception:
+        pass
 
 
 def log(msg):
@@ -164,6 +192,17 @@ def main():
                         help=f"Path to config JSONC (default: {DEFAULT_CONFIG})")
     args = parser.parse_args()
 
+    if not _acquire_wake_lock():
+        log("Another wake instance is already running — exiting")
+        sys.exit(0)
+
+    try:
+        _wake(args)
+    finally:
+        _release_wake_lock()
+
+
+def _wake(args):
     config = load_config(args.config)
     pattern = config.get("window_pattern")
     timeout = int(config.get("wake_timeout", 30))
