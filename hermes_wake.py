@@ -200,6 +200,58 @@ def send_failure_to_chat(win, reason):
         pass
 
 
+def _count_chat_text_elements(win, cap=60) -> int:
+    """Count Text controls in the window as a proxy for conversation history.
+
+    An active session with history has many Text elements (message content,
+    timestamps, tool calls, etc.). An empty/fresh session has very few.
+    Cap the scan to keep it fast.
+    """
+    try:
+        count = 0
+        for _ in win.descendants(control_type="Text"):
+            count += 1
+            if count >= cap:
+                break
+        return count
+    except Exception:
+        return 0
+
+
+def _select_wake_window(windows, short_timeout=3):
+    """Select the VS Code window most likely to contain an active session.
+
+    With a single window, returns it immediately. With multiple windows
+    (e.g. main workspace window + popped-out chat panel), uses a
+    Text-element count heuristic: the window with the most Text controls
+    is treated as the active session, because it has conversation history
+    while a freshly reloaded window has an empty chat panel.
+
+    Falls back to windows[0] if no window's chat becomes ready within
+    short_timeout seconds. See VSQode/hermes#5.
+    """
+    if len(windows) <= 1:
+        return windows[0]["window"]
+
+    best_win = None
+    best_score = -1
+    for entry in windows:
+        win = entry["window"]
+        chat = wait_for_chat_ready(win, timeout=short_timeout)
+        if not chat:
+            continue
+        score = _count_chat_text_elements(win)
+        log(f"Window '{entry['title'][:60]}' chat-text score: {score}")
+        if score > best_score:
+            best_score = score
+            best_win = win
+
+    if best_win is not None:
+        return best_win
+    log("_select_wake_window: no window ready within short timeout — using windows[0]")
+    return windows[0]["window"]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Hermes one-shot post-reload wake")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG),
@@ -241,7 +293,9 @@ def _wake(args):
         log(f"No VS Code window matching '{pattern}' — giving up")
         sys.exit(1)
 
-    win = windows[0]["window"]
+    # Prefer the window with an active session when multiple windows exist
+    # (e.g. reloaded main window + popped-out chat panel). See VSQode/hermes#5.
+    win = _select_wake_window(windows)
     log(f"Waiting for chat ready (timeout={timeout}s)...")
 
     try:
