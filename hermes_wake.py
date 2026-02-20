@@ -26,7 +26,10 @@ import os
 import time
 import json
 import argparse
+import subprocess
 from pathlib import Path
+
+WAKE_PY = Path(r"C:\www\VGM9\_\AS\0.0.Q\_\scripts\wake.py")
 
 try:
     from pywinauto import Application, findwindows
@@ -218,6 +221,20 @@ def _wake(args):
     pattern = config.get("window_pattern")
     timeout = int(config.get("wake_timeout", 30))
     message = config["wake_msg"]
+
+    # Append wake.py --brief status line if available
+    if WAKE_PY.exists():
+        try:
+            r = subprocess.run(
+                [sys.executable, str(WAKE_PY), "--brief"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=45
+            )
+            brief = (r.stdout or r.stderr or "").strip()
+            if brief:
+                message = f"{message}\n{brief}"
+        except Exception as _wake_err:
+            log(f"wake.py --brief failed: {_wake_err}")
 
     windows = find_vscode_windows(pattern)
     if not windows:
