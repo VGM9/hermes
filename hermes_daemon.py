@@ -351,7 +351,6 @@ def main():
     parser = argparse.ArgumentParser(description="Hermes idempotent daemon")
     parser.add_argument("--ensure-running", action="store_true",
                         help="Start if not running, exit 0 if already running (default behavior)")
-    parser.add_argument("--detached", action="store_true", help=argparse.SUPPRESS)  # internal use
     parser.add_argument("--stop", action="store_true", help="Stop the running daemon")
     parser.add_argument("--status", action="store_true", help="Print daemon status")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG),
@@ -376,28 +375,12 @@ def main():
             safe_print("[hermes] Not running")
         return
 
-    # Default / --ensure-running
+    # Default / --ensure-running: if already alive, exit idempotently.
+    # Backgrounding is the caller's job (VS Code task, run_in_terminal isBackground=true).
     if alive:
         safe_print(f"[hermes] Already running (PID {pid}) — exiting")
         return
 
-    # Daemonize by relaunching self in a new session and exiting.
-    # Works on MSYS2/Windows: use `python3` from PATH + start_new_session.
-    # The child writes its own PID file and runs the daemon loop.
-    if "--detached" not in sys.argv:
-        import subprocess
-        child = subprocess.Popen(
-            ["python3", str(Path(__file__).resolve()), "--detached", "--config", args.config],
-            start_new_session=True,
-            close_fds=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            cwd=str(SCRIPT_DIR),
-        )
-        safe_print(f"[hermes] Daemon started (PID {child.pid})")
-        return
-
-    # Running as detached child — own the daemon loop
     write_pid()
     try:
         run_daemon(args.config)
