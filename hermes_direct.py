@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 HERMES Direct - Send message to agent via UI automation
 
@@ -18,6 +19,16 @@ import json
 from pathlib import Path
 from pywinauto import Application, findwindows
 from pywinauto.keyboard import send_keys
+
+
+def safe_print(msg):
+    """Print with fallback for non-UTF8 terminals (Windows cp1252)"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # Replace Unicode symbols with ASCII equivalents
+        safe_msg = msg.replace('✓', '[OK]').replace('✗', '[FAIL]')
+        print(safe_msg.encode('ascii', 'replace').decode('ascii'))
 
 
 # AppData for verification
@@ -104,21 +115,25 @@ def send_message(agent_pattern, message, verify=True, timeout=5.0, no_enter=Fals
     win.set_focus()
     time.sleep(0.3)
     
-    # Open chat using keyboard shortcut
-    # Common shortcuts: Ctrl+Shift+I (Copilot Chat), Ctrl+L (some versions)
-    print("Opening chat panel...")
-    send_keys('^+i')  # Ctrl+Shift+I (Copilot Chat)
-    time.sleep(0.8)
+    # Open chat using identity-preserving method
+    print("Activating chat input (identity-preserving)...")
+    from hermes_chat_ops import click_chat_input
+    if not click_chat_input(win, open_delay_sec=0.5):
+        # Fallback: try keyboard shortcut with warning
+        print("⚠️  WARNING: Falling back to Ctrl+Shift+I (destroys agent identity)")
+        print("   See: __/.github/instructions/HERMES-CRITICAL-BUG.md")
+        send_keys('^+i')
+        time.sleep(0.8)
     
-    # Type message into chat input (should be focused after opening)
+    # Type message into chat input (WINDOW-SCOPED - critical for safety)
     print(f"Typing message ({len(message)} chars)...")
-    send_keys(message, with_spaces=True, pause=0.01)
+    win.type_keys(message, with_spaces=True, pause=0.01)  # NOT send_keys() - that's global!
     time.sleep(0.3)
     
     # Press Enter unless --no-enter
     if not no_enter:
         print("Sending (Enter)...")
-        send_keys('{ENTER}')
+        win.type_keys('{ENTER}', pause=0.1)  # Window-scoped Enter
         time.sleep(0.5)
     else:
         print("Message typed (not sent - use --no-enter)")
@@ -130,13 +145,13 @@ def send_message(agent_pattern, message, verify=True, timeout=5.0, no_enter=Fals
         while time.time() - start < timeout:
             count_after = get_session_request_count(agent_pattern)
             if count_after and count_after > count_before:
-                print(f"✓ Verified: request count {count_before} -> {count_after}")
+                safe_print(f"✓ Verified: request count {count_before} -> {count_after}")
                 return True, None
             time.sleep(0.5)
         
         return False, f"Verification timeout ({timeout}s). Message may not have been delivered."
     
-    print("✓ Sent (unverified)")
+    safe_print("✓ Sent (unverified)")
     return True, None
 
 
@@ -187,10 +202,10 @@ def main():
     success, error = send_message(agent, message, verify=verify, timeout=timeout, no_enter=no_enter)
     
     if success:
-        print(f"✓ Message delivered to {agent}")
+        safe_print(f"✓ Message delivered to {agent}")
         sys.exit(0)
     else:
-        print(f"✗ FAILED: {error}")
+        safe_print(f"✗ FAILED: {error}")
         if "No window" in str(error) or "not found" in str(error).lower():
             sys.exit(2)
         else:

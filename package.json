@@ -7,7 +7,13 @@
     "hermes": "./bin/hermes.js"
   },
   "scripts": {
-    "hermes": "node bin/hermes.js"
+    "hermes": "node bin/hermes.js",
+    "daemon:ensure":  "nohup python3 ./hermes_daemon.py --ensure-running >> hermes_daemon.log 2>&1 &",
+    "daemon:stop":    "python3 ./hermes_daemon.py --stop",
+    "daemon:status":  "python3 ./hermes_daemon.py --status",
+    "reload:phase2":  "python3 ./reload_and_wake.py --phases 2",
+    "update:detect":  "python3 ./reload_and_wake.py --phases 0 --detect-only",
+    "update:apply":   "python3 ./reload_and_wake.py --phases 0,2"
   },
   "keywords": ["vscode", "copilot", "hermes", "inter-agent", "messaging"],
   "author": "ALTAIR/9 (0.0.Q)",

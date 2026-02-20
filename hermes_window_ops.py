@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """HERMES Core - Pure functions for window operations."""
 
 import logging
@@ -5,6 +6,16 @@ import time
 from typing import Optional, Tuple, List, Dict, TYPE_CHECKING
 from pathlib import Path
 from pywinauto import Application, findwindows
+
+
+def safe_print(msg):
+    """Print with fallback for non-UTF8 terminals (Windows cp1252)"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # Replace Unicode symbols with ASCII equivalents
+        safe_msg = msg.replace('✓', '[OK]').replace('✗', '[FAIL]')
+        print(safe_msg.encode('ascii', 'replace').decode('ascii'))
 
 if TYPE_CHECKING:
     from pywinauto.uia_element_info import UIAElementInfo

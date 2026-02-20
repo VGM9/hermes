@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """HERMES Core - Pure functions for chat operations."""
 
 import logging
@@ -13,12 +14,87 @@ class ChatOperationError(Exception):
     pass
 
 
+def click_chat_input(
+    window,
+    open_delay_sec: float = 0.5
+) -> bool:
+    """Click chat input field directly (IDENTITY-PRESERVING alternative to Ctrl+Shift+I).
+    
+    ✅ SAFE: This method does NOT reset agent selection dropdown.
+    
+    Searches for the chat input edit control and clicks it to activate chat.
+    Preserves agent identity unlike keyboard shortcuts.
+    
+    Args:
+        window: pywinauto window object (from hermes_window_ops)
+        open_delay_sec: Time to wait for chat to activate (default: 0.5s)
+        
+    Returns:
+        True if chat input found and clicked, False otherwise
+        
+    Raises:
+        ChatOperationError: If window interaction fails
+    """
+    try:
+        logger.debug("Searching for chat input field...")
+        
+        # Find Edit controls (chat input is an Edit control in VS Code)
+        edit_controls = window.descendants(control_type="Edit")
+        
+        for edit in edit_controls:
+            name = edit.element_info.name.lower() if hasattr(edit.element_info, 'name') else ""
+            automation_id = edit.element_info.automation_id.lower() if hasattr(edit.element_info, 'automation_id') else ""
+            class_name = edit.element_info.class_name.lower() if hasattr(edit.element_info, 'class_name') else ""
+            
+            # Look for chat input specifically
+            # VS Code pattern: "Chat Input (AgentName), undefined, Model..."
+            if "chat input" in name or class_name == "native-edit-context":
+                try:
+                    logger.info(f"Found chat input: {name[:60] if name else class_name}")
+                    edit.click_input()
+                    time.sleep(open_delay_sec)
+                    logger.info("✓ Chat input activated (identity preserved)")
+                    return True
+                except Exception as e:
+                    logger.debug(f"Failed to click edit control: {e}")
+                    continue
+        
+        logger.warning("Could not find chat input field")
+        return False
+        
+    except Exception as e:
+        logger.error(f"Failed to activate chat: {e}")
+        raise ChatOperationError(f"Cannot activate chat input: {e}") from e
+
+
 def open_chat(
     keybinding: str = "^+i",
     open_delay_sec: float = 0.8,
     focus_delay_sec: float = 0.3
 ) -> None:
     """Open VS Code chat panel using keyboard shortcut.
+    
+    ⚠️ CRITICAL WARNING: Ctrl+Shift+I DESTROYS AGENT IDENTITY ⚠️
+    
+    This keyboard shortcut (^+i) resets VS Code agent selection dropdown
+    from custom agents (e.g., "0.0.Q (HUSK)", "ALTAIR") to default "Agent".
+    
+    Consequences:
+    - Recipient loses specialized agent identity
+    - Custom tools (qhoami, qopilot, etc.) become unavailable
+    - Agent instructions (.agent.md frontmatter) ignored
+    - Specialized context lost
+    - False memories/confusion from identity contamination
+    
+    DO NOT USE for inter-agent messaging unless you have:
+    1. Verified agent selection before opening chat
+    2. Method to restore agent selection after opening  
+    3. Documented this risk to recipient
+    
+    RECOMMENDED ALTERNATIVE: Use click_chat_input(window) instead (identity-preserving)
+    
+    See: __/.github/instructions/HERMES-CRITICAL-BUG.md
+    See: __/projects/hermes-protocol-fixes/M2-IDENTITY-PRESERVATION.md
     
     Args:
         keybinding: Keyboard shortcut to send (default: Ctrl+Shift+I = "^+i")
@@ -33,9 +109,11 @@ def open_chat(
         Different modes/platforms may need adjustment.
     """
     try:
+        logger.warning(f"DEPRECATED: Using global send_keys for {keybinding}")
+        logger.warning("This sends to ACTIVE window, not target window!")
         logger.debug(f"Sending keybinding: {keybinding}")
         time.sleep(focus_delay_sec)  # Wait before sending
-        send_keys(keybinding)
+        send_keys(keybinding)  # GLOBAL - goes to active window (DANGEROUS)
         logger.info("Chat panel open command sent")
         time.sleep(open_delay_sec)  # Wait for panel to render
     except Exception as e:
@@ -44,13 +122,18 @@ def open_chat(
 
 
 def type_message(
+    window,
     message: str,
     char_delay_sec: float = 0.01,
     post_type_delay_sec: float = 0.3
 ) -> None:
-    """Type message into chat input (must be focused).
+    """Type message into chat input (WINDOW-SCOPED for safety).
+    
+    CRITICAL: This function now requires a window parameter to ensure
+    keyboard input goes to the TARGET window, not the active window.
     
     Args:
+        window: pywinauto window object (target window)
         message: Message text to type
         char_delay_sec: Delay between characters (default: 0.01s)
         post_type_delay_sec: Delay after typing completes (default: 0.3s)
@@ -60,7 +143,7 @@ def type_message(
     """
     try:
         logger.debug(f"Typing message: {len(message)} chars")
-        send_keys(message, with_spaces=True, pause=char_delay_sec)
+        window.type_keys(message, with_spaces=True, pause=char_delay_sec)
         logger.info(f"Message typed successfully")
         time.sleep(post_type_delay_sec)
     except Exception as e:
@@ -69,11 +152,15 @@ def type_message(
 
 
 def send_message(
+    window,
     post_send_delay_sec: float = 0.5
 ) -> None:
-    """Send message via Enter key.
+    """Send message via Enter key (WINDOW-SCOPED).
+    
+    CRITICAL: Requires window parameter to ensure Enter goes to target window.
     
     Args:
+        window: pywinauto window object (target window)
         post_send_delay_sec: Delay after pressing Enter (default: 0.5s)
         
     Raises:
@@ -81,7 +168,7 @@ def send_message(
     """
     try:
         logger.debug("Pressing Enter to send")
-        send_keys('{ENTER}')
+        window.type_keys('{ENTER}', pause=0.1)
         logger.info("Message sent")
         time.sleep(post_send_delay_sec)
     except Exception as e:
@@ -90,13 +177,17 @@ def send_message(
 
 
 def type_without_send(
+    window,
     message: str,
     char_delay_sec: float = 0.01,
     post_type_delay_sec: float = 0.3
 ) -> None:
-    """Type message into chat without pressing Enter (for defer-send scenarios).
+    """Type message into chat without pressing Enter (WINDOW-SCOPED).
+    
+    CRITICAL: Requires window parameter for safe keyboard targeting.
     
     Args:
+        window: pywinauto window object (target window)
         message: Message text to type
         char_delay_sec: Delay between characters (default: 0.01s)
         post_type_delay_sec: Delay after typing completes (default: 0.3s)
@@ -106,7 +197,7 @@ def type_without_send(
     """
     try:
         logger.debug(f"Typing message (no send): {len(message)} chars")
-        send_keys(message, with_spaces=True, pause=char_delay_sec)
+        window.type_keys(message, with_spaces=True, pause=char_delay_sec)
         logger.info(f"Message typed (awaiting send)")
         time.sleep(post_type_delay_sec)
     except Exception as e:

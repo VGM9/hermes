@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """HERMES Config - Load and manage configuration from files and environment."""
 
 import logging

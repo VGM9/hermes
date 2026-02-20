@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """HERMES Workspace Discovery - Declarative VSCode Session Querying
 
 Instead of scraping AppData, query VSCode directly via qopilot extension context.

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 HERMES Approval Decision - Inference layer for evaluating agent requests
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Session ID to Window Mapper for HERMES
 Maps VSCode session IDs to window handles for reliable messaging.
@@ -10,6 +11,16 @@ import glob
 from pathlib import Path
 from pywinauto import Desktop
 from typing import Optional, Dict, Tuple, List
+
+
+def safe_print(msg):
+    """Print with fallback for non-UTF8 terminals (Windows cp1252)"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        # Replace Unicode symbols with ASCII equivalents
+        safe_msg = msg.replace('✓', '[OK]').replace('✗', '[FAIL]')
+        print(safe_msg.encode('ascii', 'replace').decode('ascii'))
 
 
 def get_vscode_appdata() -> Path:
@@ -147,11 +158,11 @@ def find_window_by_session_id(session_id: str) -> Optional[Tuple[any, str]]:
     # Find session's workspace
     result = find_session_workspace(session_id)
     if not result:
-        print(f"✗ Session {session_id} not found in any workspace")
+        safe_print(f"✗ Session {session_id} not found in any workspace")
         return None
     
     workspace_hash, session_file = result
-    print(f"✓ Found session in workspace {workspace_hash}")
+    safe_print(f"✓ Found session in workspace {workspace_hash}")
     print(f"  Session file: {session_file.name}")
     
     # Get workspace identifier
@@ -168,10 +179,10 @@ def find_window_by_session_id(session_id: str) -> Optional[Tuple[any, str]]:
     
     for window, title in vscode_windows:
         if identifier.lower() in title.lower():
-            print(f"✓ Matched window: {title}")
+            safe_print(f"✓ Matched window: {title}")
             return (window, title)
     
-    print(f"✗ No window found with identifier '{identifier}' in title")
+    safe_print(f"✗ No window found with identifier '{identifier}' in title")
     print(f"  Available windows:")
     for _, title in vscode_windows:
         print(f"    - {title}")
@@ -193,14 +204,14 @@ if __name__ == "__main__":
     # Support partial session IDs (just the first part)
     if len(session_id) < 36:
         print(f"Partial session ID provided: {session_id}")
-        print("Searching for full session ID...\n")
+        safe_print("Searching for full session ID...\\n")
     
     result = find_window_by_session_id(session_id)
     
     if result:
         window, title = result
-        print(f"\n✓ SUCCESS: Found window for session {session_id}")
-        print(f"  Title: {title}")
+        safe_print(f"\\n\u2713 SUCCESS: Found window for session {session_id}")
+        safe_print(f"  Title: {title}")
     else:
-        print(f"\n✗ FAILED: Could not find window for session {session_id}")
+        safe_print(f"\\n\u2717 FAILED: Could not find window for session {session_id}")
         sys.exit(1)

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """HERMES Nonce-Based Session Verification - Deterministic caller identification.
 
 This module provides nonce-based session identification to solve race conditions.

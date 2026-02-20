@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 HERMES Sessions - Click on sessions in the VS Code Chat Sessions panel
 
