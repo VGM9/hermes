@@ -36,6 +36,7 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_CONFIG = SCRIPT_DIR / "hermes_config.jsonc"
 LOG_FILE = SCRIPT_DIR / "hermes_daemon.log"
+VSCODE_CLASS = "Chrome_WidgetWin_1"
 
 
 def log(msg):
@@ -137,6 +138,16 @@ def send_wake_message(win, message):
         win.type_keys("{ENTER}")
 
 
+def send_failure_to_chat(win, reason):
+    """Best-effort: send a failure notice into chat so the agent sees it."""
+    try:
+        chat = wait_for_chat_ready(win, timeout=5)
+        if chat:
+            send_wake_message(win, f"hermes:wake failed — {reason}")
+    except Exception:
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="Hermes one-shot post-reload wake")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG),
@@ -150,20 +161,28 @@ def main():
 
     windows = find_vscode_windows(pattern)
     if not windows:
-        print(f"[hermes:wake] No VS Code window matching '{pattern}' — giving up")
+        log(f"No VS Code window matching '{pattern}' — giving up")
         sys.exit(1)
 
     win = windows[0]["window"]
-    print(f"[hermes:wake] Waiting for chat ready (timeout={timeout}s)...")
     log(f"Waiting for chat ready (timeout={timeout}s)...")
-    chat = wait_for_chat_ready(win, timeout=timeout)
-    if not chat:
-        log("Chat never ready — timeout exceeded")
-        sys.exit(1)
 
-    log(f"Sending: '{message}'")
-    send_wake_message(win, message)
-    log("Done")
+    try:
+        chat = wait_for_chat_ready(win, timeout=timeout)
+        if not chat:
+            reason = "chat never ready (timeout exceeded)"
+            log(reason)
+            send_failure_to_chat(win, reason)
+            sys.exit(1)
+
+        log(f"Sending: '{message}'")
+        send_wake_message(win, message)
+        log("Done")
+    except Exception as e:
+        reason = str(e)
+        log(f"Exception: {reason}")
+        send_failure_to_chat(win, reason)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
