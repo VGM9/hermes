@@ -285,40 +285,26 @@ def trigger_chat_timeout_restart(windows):
 # Trigger: wake on reload
 # ─────────────────────────────────────────────────────────────────────────────
 
-_LOADING_STRINGS = ("getting chat ready", "chat is almost ready", "loading", "initializing")
-
 def wait_for_chat_ready(window, timeout=45):
-    """Wait until chat Edit control is visible, enabled, AND loading text is gone.
+    """Wait until chat Edit control is visible and enabled.
 
-    Two-phase check:
-    1. Find the Edit control (confirms UI exists)
-    2. Confirm no 'Getting chat ready' / 'Chat is almost ready' text in window
-
-    The Edit control appears before Copilot extension is connected — waiting
-    for loading strings to disappear is the true readiness signal.
+    Sends as soon as the input is interactable. If Copilot extension isn't
+    connected yet, the send will fail with a timeout error — the
+    trigger_chat_timeout_restart trigger handles recovery automatically.
     """
     end = time.time() + timeout
     while time.time() < end:
         try:
-            # Phase 1: find the edit control
-            edit_found = None
             for edit in window.descendants(control_type="Edit"):
                 name = (edit.element_info.name or "").lower()
                 cls = edit.element_info.class_name or ""
                 if "chat input" in name or cls == "native-edit-context":
                     if edit.is_visible() and edit.is_enabled():
-                        edit_found = edit
-                        break
-
-            if edit_found:
-                # Phase 2: confirm loading text gone
-                texts = [d.window_text().lower() for d in window.descendants() if d.window_text()]
-                if not any(s in t for s in _LOADING_STRINGS for t in texts):
-                    try:
-                        edit_found.click_input()
-                        return edit_found
-                    except Exception:
-                        pass
+                        try:
+                            edit.click_input()
+                            return edit
+                        except Exception:
+                            pass
         except Exception:
             pass
         time.sleep(0.5)
