@@ -1,0 +1,9 @@
+{
+  "_comment": "POLARIS3 target declaration. Written by POLARIS3 at 0.0.37+. Read by hermes_wake.py.",
+  "agent_mode": "POLARIS3",
+  "workspace_name": "0.0.Q_AS_ALTAIR0_OF_VGM9.www",
+  "window_title_hint": "0.0.Q",
+  "hermes_issue": "https://github.com/VGM9/hermes/issues/6",
+  "wake_msg": "Window reloaded. qhoami",
+  "notes": "POLARIS3 runs in a floating chat popout or secondary sidebar of the 0.0.Q workspace. The agent-mode-label button reads 'POLARIS3'. hermes_wake should match on this label, not on window title substring (which is ambiguous with POLARIS1's VGM9 window)."
+}

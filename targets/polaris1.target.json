@@ -1,0 +1,9 @@
+{
+  "_comment": "POLARIS1 target declaration. Written by POLARIS1 at 0.1.2+. Read by hermes_wake.py.",
+  "agent_mode": "POLARIS1",
+  "workspace_name": "agent-hub.code-workspace",
+  "window_title_hint": "VGM9",
+  "hermes_issue": "https://github.com/VGM9/hermes/issues/6",
+  "wake_msg": "Window reloaded. qhoami",
+  "notes": "POLARIS1 runs in the main VGM9 workspace window. The agent-mode-label button reads 'POLARIS1'. This file is a placeholder — POLARIS1 should overwrite it with their actual window_title_hint once confirmed."
+}
