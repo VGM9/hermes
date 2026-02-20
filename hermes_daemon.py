@@ -430,8 +430,10 @@ def poll_once(state, config, config_path):
         trigger_reload_dialog(windows)
 
     # ── Chat timeout Restart ─────────────────────────────────────────────────
-    if triggers.get("chat_timeout_restart", True) and windows:
-        trigger_chat_timeout_restart(windows)
+    # Only active during reload recovery — prevents clicking regenerate on normal responses.
+    if triggers.get("chat_timeout_restart", True) and windows and state.reload_pending:
+        if trigger_chat_timeout_restart(windows):
+            state.reload_pending = False
 
     state.known_handles = current_handles
     return config  # return hot-reloaded config for next interval
