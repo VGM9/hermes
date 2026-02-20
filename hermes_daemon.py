@@ -43,7 +43,7 @@ except ImportError:
     sys.exit(1)
 
 SCRIPT_DIR = Path(__file__).parent
-DEFAULT_CONFIG = SCRIPT_DIR / "hermes_config.json"
+DEFAULT_CONFIG = SCRIPT_DIR / "hermes_config.jsonc"
 PID_FILE = SCRIPT_DIR / "hermes_daemon.pid"
 VSCODE_CLASS = "Chrome_WidgetWin_1"
 
@@ -77,7 +77,10 @@ def load_config(path):
         "wake_debounce_seconds": 10,
     }
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        raw = Path(path).read_text(encoding="utf-8")
+        # Strip // line comments for .jsonc compatibility
+        stripped = "\n".join(l for l in raw.splitlines() if not l.lstrip().startswith("/"))
+        data = json.loads(stripped)
         # Merge with defaults so missing keys don't crash
         merged = {**defaults, **data}
         merged["triggers"] = {**defaults["triggers"], **data.get("triggers", {})}

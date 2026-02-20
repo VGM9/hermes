@@ -1,5 +1,5 @@
+// Hermes daemon trigger config. Edit to toggle behaviors without restarting the daemon.
 {
-  "_comment": "Hermes daemon trigger config. Edit to toggle behaviors without restarting the daemon.",
   "triggers": {
     "update_button": true,
     "reload_dialog": true,
