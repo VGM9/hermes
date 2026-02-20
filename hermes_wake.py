@@ -307,6 +307,17 @@ def _wake(args):
             sys.exit(1)
 
         log(f"Sending: '{message}'")
+
+        # Abort if the box is non-empty — session is active, not post-reload idle.
+        # Typing into a non-empty box would corrupt the user's draft (hermes#4).
+        try:
+            current = chat.get_value() or chat.window_text() or ''
+            if current.strip():
+                log("Chat box non-empty — session active, skipping wake")
+                sys.exit(0)
+        except Exception:
+            pass  # can't read value — proceed anyway
+
         send_wake_message(win, message)
         log("Done")
     except Exception as e:
