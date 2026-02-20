@@ -336,6 +336,7 @@ class DaemonState:
     def __init__(self):
         self.known_handles = set()
         self.reload_pending = False       # a reload was detected (handles disappeared)
+        self.wake_sent = False            # wake message was sent; retry handler is active until chat responds
         self.woken_handles = set()        # handles already woken — never re-wake the same handle
         self.last_update_click_time = 0.0  # debounce: don't click update button repeatedly
 
@@ -412,6 +413,7 @@ def poll_once(state, config, config_path):
                         send_wake_message(win, config["wake_msg"])
                         state.woken_handles.add(entry["handle"])
                         state.reload_pending = False
+                        state.wake_sent = True  # retry handler now active
                     else:
                         safe_print("[hermes] Chat never ready — skipping wake")
                     break  # one window per poll cycle
@@ -430,10 +432,11 @@ def poll_once(state, config, config_path):
         trigger_reload_dialog(windows)
 
     # ── Chat timeout Restart ─────────────────────────────────────────────────
-    # Only active during reload recovery — prevents clicking regenerate on normal responses.
-    if triggers.get("chat_timeout_restart", True) and windows and state.reload_pending:
+    # Active only after wake_sent — prevents clicking Regenerate on normal responses.
+    # Clears wake_sent on success, so retries stop once the error is resolved.
+    if triggers.get("chat_timeout_restart", True) and windows and state.wake_sent:
         if trigger_chat_timeout_restart(windows):
-            state.reload_pending = False
+            state.wake_sent = False
 
     state.known_handles = current_handles
     return config  # return hot-reloaded config for next interval
