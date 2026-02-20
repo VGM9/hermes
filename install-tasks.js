@@ -114,6 +114,30 @@ function mergeTasks(existing, incoming) {
   return { ...existing, tasks: [...kept, ...incoming] };
 }
 
+/**
+ * Walk UP from workspaceRoot toward the filesystem root.
+ * If any ancestor directory has a .vscode/tasks.json that already contains
+ * hermes tasks, return that ancestor path — we should not write a second copy
+ * into a nested workspace root.
+ */
+function findAncestorWithHermesTasks(workspaceRoot) {
+  let dir = dirname(resolve(workspaceRoot));
+  while (true) {
+    const candidate = join(dir, '.vscode', 'tasks.json');
+    if (existsSync(candidate)) {
+      try {
+        const data = JSON.parse(readFileSync(candidate, 'utf8'));
+        if ((data.tasks ?? []).some(t => t.label?.startsWith('hermes:'))) {
+          return dir;
+        }
+      } catch { /* unreadable — keep walking */ }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 function main() {
@@ -123,6 +147,15 @@ function main() {
   if (!workspaceRoot) {
     console.error('[hermes:install-tasks] Cannot resolve workspace root.');
     console.error('  Run via: npm install (sets $INIT_CWD), or pass --root /abs/path');
+    process.exit(1);
+  }
+
+  // Refuse to write into a nested workspace root when an ancestor already has
+  // hermes tasks — that would create duplicate folderOpen triggers.
+  const ancestor = findAncestorWithHermesTasks(workspaceRoot);
+  if (ancestor) {
+    console.error(`[hermes:install-tasks] Ancestor workspace at ${ancestor} already has hermes tasks.`);
+    console.error(`  Writing here would create duplicate folderOpen triggers. Run from the top-level workspace root instead.`);
     process.exit(1);
   }
 
