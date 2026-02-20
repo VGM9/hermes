@@ -3,7 +3,8 @@
   "triggers": {
     "update_button": true,
     "reload_dialog": true,
-    "wake_on_reload": true
+    "wake_on_reload": true,
+    "chat_timeout_restart": true
   },
   "wake_msg": "Window reloaded. #qhoami",
   "poll_interval": 0.8,

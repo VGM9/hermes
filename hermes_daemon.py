@@ -240,6 +240,31 @@ def trigger_reload_dialog(windows):
     return False
 
 
+def trigger_chat_timeout_restart(windows):
+    """Find and click Restart when Copilot chat extension times out loading.
+
+    Detects: 'Chat took too long to get ready' error message rendered inline
+    in the chat panel after a message was sent before the extension was ready.
+    Clicks the blue Restart button to retry. See VSQode/hermes#5.
+    """
+    for entry in windows:
+        win = entry["window"]
+        if win is None:
+            continue
+        try:
+            descendants = win.descendants()
+            texts = [d.window_text().lower() for d in descendants if d.window_text()]
+            if any("chat took too long" in t or "took too long to get ready" in t for t in texts):
+                for btn in win.descendants(control_type="Button"):
+                    if btn.window_text().lower() == "restart":
+                        btn.click_input()
+                        safe_print(f"[hermes] Clicked chat timeout Restart button")
+                        return True
+        except Exception:
+            pass
+    return False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Trigger: wake on reload
 # ─────────────────────────────────────────────────────────────────────────────
@@ -382,6 +407,10 @@ def poll_once(state, config, config_path):
     # ── Reload dialog ────────────────────────────────────────────────────────
     if triggers.get("reload_dialog") and windows:
         trigger_reload_dialog(windows)
+
+    # ── Chat timeout Restart ─────────────────────────────────────────────────
+    if triggers.get("chat_timeout_restart", True) and windows:
+        trigger_chat_timeout_restart(windows)
 
     state.known_handles = current_handles
     return config  # return hot-reloaded config for next interval
