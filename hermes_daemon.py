@@ -46,14 +46,6 @@ except ImportError:
     print("ERROR: pywinauto not installed. Run: pip install pywinauto")
     sys.exit(1)
 
-try:
-    import win32gui as _win32gui
-    def _foreground_hwnd():
-        return _win32gui.GetForegroundWindow()
-except ImportError:
-    def _foreground_hwnd():
-        return None
-
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_CONFIG = SCRIPT_DIR / "hermes_config.jsonc"
 PID_FILE = SCRIPT_DIR / "hermes_daemon.pid"
@@ -291,10 +283,14 @@ def trigger_chat_timeout_restart(windows):
                     safe_print("[hermes] Clicked chat timeout Restart button")
                     return True
 
-            # Fall back: accessible name scan for retry/regenerate icon
+            # Fall back: accessible name scan for retry/regenerate icon.
+            # Use exact matching (not substring) to avoid false-positive clicks on
+            # unrelated UI elements whose accessible name merely contains "retry"
+            # (e.g. search results, pagination buttons). See VSQode/hermes#6.
+            RETRY_EXACT_NAMES = {"retry", "regenerate", "regenerate response", "try again", "resend"}
             for btn in win.descendants(control_type="Button"):
                 name = (btn.element_info.name or "").lower()
-                if any(k in name for k in ("retry", "regenerate", "try again", "resend")):
+                if name in RETRY_EXACT_NAMES:
                     btn.click_input()
                     safe_print(f"[hermes] Clicked chat retry icon: '{btn.element_info.name}'")
                     return True
@@ -320,31 +316,23 @@ def poll_once(state, config, config_path):
 
     windows = find_vscode_windows(pattern)
 
-    # Skip any window the user is currently typing in.
-    # A window with active keyboard focus cannot simultaneously show the
-    # reload dialog or update button — and walking its UIA tree fires
-    # AutomationFocusChangedEvent, stealing focus from the user's input.
-    # See VGM9/hermes#2.
-    focused = _foreground_hwnd()
-    safe_windows = [w for w in windows if w["handle"] != focused]
-
     # ── Update button ──────────────────────────────────────────────────────
-    if triggers.get("update_button") and safe_windows:
+    if triggers.get("update_button") and windows:
         update_debounce = config.get("update_click_debounce_seconds", 30)
         if time.time() - state.last_update_click_time > update_debounce:
-            if trigger_update_button(safe_windows):
+            if trigger_update_button(windows):
                 state.last_update_click_time = time.time()
 
     # ── Reload dialog ────────────────────────────────────────────────────────
-    if triggers.get("reload_dialog") and safe_windows:
-        trigger_reload_dialog(safe_windows)
+    if triggers.get("reload_dialog") and windows:
+        trigger_reload_dialog(windows)
 
     # ── Chat timeout Restart ─────────────────────────────────────────────────
     # Text-gated: only fires when "Chat took too long to get ready" is visible.
     # hermes_wake.py (folderOpen task) sends the initial wake message;
     # this picks up the error if Copilot wasn't ready yet.
-    if triggers.get("chat_timeout_restart", True) and safe_windows:
-        trigger_chat_timeout_restart(safe_windows)
+    if triggers.get("chat_timeout_restart", True) and windows:
+        trigger_chat_timeout_restart(windows)
 
     return config  # return hot-reloaded config for next interval
 
