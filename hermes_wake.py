@@ -91,14 +91,37 @@ def wait_for_chat_ready(win, timeout=30):
     return None
 
 
+_SEND_BUTTON_NAMES = {"send", "send message", "submit"}
+
+
+def _find_send_button(win):
+    """Return the Send button control, or None."""
+    for btn in win.descendants(control_type="Button"):
+        name = (btn.element_info.name or "").lower()
+        if name in _SEND_BUTTON_NAMES:
+            return btn
+    return None
+
+
 def send_wake_message(win, message):
+    # Dismiss any open autocomplete/picker before typing.
+    win.type_keys("{ESCAPE}")
+    time.sleep(0.1)
+
     escaped = (message
                .replace("{", "{{").replace("}", "}}")
                .replace("+", "{+}").replace("^", "{^}")
                .replace("%", "{%}").replace("~", "{~}"))
     win.type_keys(escaped, with_spaces=True, pause=0.02)
-    time.sleep(0.3)
-    win.type_keys("{ENTER}")
+    time.sleep(0.2)
+
+    # Prefer clicking the Send button — avoids Enter being swallowed by
+    # any picker that got re-triggered by the message text.
+    btn = _find_send_button(win)
+    if btn:
+        btn.click_input()
+    else:
+        win.type_keys("{ENTER}")
 
 
 def main():

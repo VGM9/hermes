@@ -6,7 +6,7 @@
     "wake_on_reload": true,
     "chat_timeout_restart": true
   },
-  "wake_msg": "Window reloaded. #qhoami",
+  "wake_msg": "Window reloaded. qhoami",
   "poll_interval": 0.8,
   "window_pattern": "VGM9",
   "wake_debounce_seconds": 10
