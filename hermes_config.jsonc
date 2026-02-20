@@ -8,6 +8,6 @@
   },
   "wake_msg": "Window reloaded. qhoami",
   "poll_interval": 0.8,
-  "window_pattern": "VGM9",
+  "window_pattern": "",
   "wake_debounce_seconds": 10
 }

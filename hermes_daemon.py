@@ -73,22 +73,33 @@ def safe_print(msg):
 
 
 def load_config(path):
-    """Load config JSON, return dict. Returns defaults on any error."""
+    """Load config JSON, return dict. Returns defaults on any error.
+    If hermes_config.local.jsonc exists alongside path, its values overlay
+    the base config — used for per-workspace overrides (e.g. window_pattern).
+    """
     defaults = {
         "triggers": {"update_button": True, "reload_dialog": True, "wake_on_reload": True},
         "wake_msg": "Window reloaded. #qhoami",
         "poll_interval": 0.8,
-        "window_pattern": "VGM9",
+        "window_pattern": "",
         "wake_debounce_seconds": 10,
     }
-    try:
-        raw = Path(path).read_text(encoding="utf-8")
-        # Strip // line comments for .jsonc compatibility
+    def _parse(fpath):
+        raw = Path(fpath).read_text(encoding="utf-8")
         stripped = "\n".join(l for l in raw.splitlines() if not l.lstrip().startswith("/"))
-        data = json.loads(stripped)
-        # Merge with defaults so missing keys don't crash
+        return json.loads(stripped)
+    try:
+        data = _parse(path)
         merged = {**defaults, **data}
         merged["triggers"] = {**defaults["triggers"], **data.get("triggers", {})}
+        # Overlay with local config if present
+        local_path = Path(path).parent / "hermes_config.local.jsonc"
+        if local_path.exists():
+            try:
+                local = _parse(local_path)
+                merged.update(local)
+            except Exception as le:
+                safe_print(f"[hermes] Local config error ({local_path}): {le} — ignored")
         return merged
     except Exception as e:
         safe_print(f"[hermes] Config load error ({path}): {e} — using defaults")

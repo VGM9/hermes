@@ -52,14 +52,24 @@ def log(msg):
 def load_config(path=DEFAULT_CONFIG):
     defaults = {
         "wake_msg": "Window reloaded. qhoami",
-        "window_pattern": "VGM9",
+        "window_pattern": "",
         "wake_timeout": 30,
     }
-    try:
-        raw = Path(path).read_text(encoding="utf-8")
+    def _parse(fpath):
+        raw = Path(fpath).read_text(encoding="utf-8")
         stripped = "\n".join(l for l in raw.splitlines() if not l.lstrip().startswith("/"))
-        data = json.loads(stripped)
-        return {**defaults, **data}
+        return json.loads(stripped)
+    try:
+        data = _parse(path)
+        merged = {**defaults, **data}
+        # Overlay with local config if present
+        local_path = Path(path).parent / "hermes_config.local.jsonc"
+        if local_path.exists():
+            try:
+                merged.update(_parse(local_path))
+            except Exception as le:
+                print(f"[hermes:wake] Local config error: {le} — ignored")
+        return merged
     except Exception as e:
         print(f"[hermes:wake] Config error: {e} — using defaults")
         return defaults

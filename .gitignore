@@ -34,6 +34,7 @@ venv.bak/
 node_modules/
 
 # Runtime daemon files
+hermes_config.local.jsonc
 hermes_daemon.pid
 hermes_daemon.terminal_id
 hermes_daemon.log
