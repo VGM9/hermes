@@ -241,11 +241,15 @@ def trigger_reload_dialog(windows):
 
 
 def trigger_chat_timeout_restart(windows):
-    """Find and click Restart when Copilot chat extension times out loading.
+    """Click retry after 'Chat took too long to get ready' error.
 
-    Detects: 'Chat took too long to get ready' error message rendered inline
-    in the chat panel after a message was sent before the extension was ready.
-    Clicks the blue Restart button to retry. See VSQode/hermes#5.
+    VS Code renders two button layouts for this error:
+    - A named 'Restart' button (first occurrence)
+    - A row of icon buttons below the response; the retry icon (⟳) has
+      accessible name 'Retry' or 'Regenerate response' with no visible text
+
+    Try named button first, then fall back to accessible-name scan.
+    See VSQode/hermes#5.
     """
     for entry in windows:
         win = entry["window"]
@@ -254,12 +258,24 @@ def trigger_chat_timeout_restart(windows):
         try:
             descendants = win.descendants()
             texts = [d.window_text().lower() for d in descendants if d.window_text()]
-            if any("chat took too long" in t or "took too long to get ready" in t for t in texts):
-                for btn in win.descendants(control_type="Button"):
-                    if btn.window_text().lower() == "restart":
-                        btn.click_input()
-                        safe_print(f"[hermes] Clicked chat timeout Restart button")
-                        return True
+            if not any("chat took too long" in t or "took too long to get ready" in t for t in texts):
+                continue
+
+            # Try named button first
+            for btn in win.descendants(control_type="Button"):
+                label = btn.window_text().lower()
+                if label == "restart":
+                    btn.click_input()
+                    safe_print("[hermes] Clicked chat timeout Restart button")
+                    return True
+
+            # Fall back: accessible name scan for retry/regenerate icon
+            for btn in win.descendants(control_type="Button"):
+                name = (btn.element_info.name or "").lower()
+                if any(k in name for k in ("retry", "regenerate", "try again", "resend")):
+                    btn.click_input()
+                    safe_print(f"[hermes] Clicked chat retry icon: '{btn.element_info.name}'")
+                    return True
         except Exception:
             pass
     return False
@@ -269,21 +285,40 @@ def trigger_chat_timeout_restart(windows):
 # Trigger: wake on reload
 # ─────────────────────────────────────────────────────────────────────────────
 
-def wait_for_chat_ready(window, timeout=30):
-    """Wait until chat Edit control is visible, enabled, and clickable. Returns element or None."""
+_LOADING_STRINGS = ("getting chat ready", "chat is almost ready", "loading", "initializing")
+
+def wait_for_chat_ready(window, timeout=45):
+    """Wait until chat Edit control is visible, enabled, AND loading text is gone.
+
+    Two-phase check:
+    1. Find the Edit control (confirms UI exists)
+    2. Confirm no 'Getting chat ready' / 'Chat is almost ready' text in window
+
+    The Edit control appears before Copilot extension is connected — waiting
+    for loading strings to disappear is the true readiness signal.
+    """
     end = time.time() + timeout
     while time.time() < end:
         try:
+            # Phase 1: find the edit control
+            edit_found = None
             for edit in window.descendants(control_type="Edit"):
                 name = (edit.element_info.name or "").lower()
                 cls = edit.element_info.class_name or ""
                 if "chat input" in name or cls == "native-edit-context":
                     if edit.is_visible() and edit.is_enabled():
-                        try:
-                            edit.click_input()
-                            return edit
-                        except Exception:
-                            pass
+                        edit_found = edit
+                        break
+
+            if edit_found:
+                # Phase 2: confirm loading text gone
+                texts = [d.window_text().lower() for d in window.descendants() if d.window_text()]
+                if not any(s in t for s in _LOADING_STRINGS for t in texts):
+                    try:
+                        edit_found.click_input()
+                        return edit_found
+                    except Exception:
+                        pass
         except Exception:
             pass
         time.sleep(0.5)
