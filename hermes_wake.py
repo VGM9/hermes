@@ -42,22 +42,33 @@ WAKE_LOCK_FILE = SCRIPT_DIR / "hermes_wake.lock"
 
 
 def _acquire_wake_lock():
-    """Write our PID to the lock file. Return True if we got the lock,
-    False if another wake instance is already running.
+    """Atomically create the lock file. Return True if we got the lock,
+    False if another wake instance already holds it.
+    Uses open(path, 'x') — O_CREAT|O_EXCL — which is atomic on NTFS.
     """
-    if WAKE_LOCK_FILE.exists():
+    try:
+        with open(WAKE_LOCK_FILE, 'x') as f:
+            f.write(str(os.getpid()))
+        return True
+    except FileExistsError:
+        # File already exists — check if the owning process is still alive
         try:
             other_pid = int(WAKE_LOCK_FILE.read_text().strip())
-            # Check if that process is still alive
             try:
                 os.kill(other_pid, 0)
                 return False  # alive — another wake is running
             except (ProcessLookupError, PermissionError):
-                pass  # process gone — stale lock, take it
+                pass  # process gone — stale lock
         except Exception:
-            pass  # unreadable lock — take it
-    WAKE_LOCK_FILE.write_text(str(os.getpid()))
-    return True
+            pass
+        # Stale lock: remove and try once more (not a loop — if it fails again, yield)
+        try:
+            WAKE_LOCK_FILE.unlink()
+            with open(WAKE_LOCK_FILE, 'x') as f:
+                f.write(str(os.getpid()))
+            return True
+        except Exception:
+            return False
 
 
 def _release_wake_lock():
