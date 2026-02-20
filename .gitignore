@@ -32,3 +32,11 @@ venv.bak/
 .vscode/
 .idea/
 node_modules/
+
+# Runtime daemon files
+hermes_daemon.pid
+hermes_daemon.terminal_id
+hermes_daemon.log
+hermes_daemon_run.log
+reload_automation.log
+nohup.out

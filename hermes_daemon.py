@@ -105,6 +105,11 @@ def read_pid():
 def is_process_alive(pid):
     """Return True if a process with the given PID is running."""
     try:
+        import psutil
+        return psutil.pid_exists(pid)
+    except ImportError:
+        pass
+    try:
         os.kill(pid, 0)
         return True
     except (ProcessLookupError, PermissionError):
