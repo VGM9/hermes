@@ -51,7 +51,8 @@ SCRIPT_DIR = Path(__file__).parent
 DEFAULT_CONFIG = SCRIPT_DIR / "hermes_config.jsonc"
 PID_FILE = SCRIPT_DIR / "hermes_daemon.pid"
 VSCODE_CLASS = "Chrome_WidgetWin_1"
-DETACHED_PROCESS = 0x00000008  # Windows: detach child from parent console
+DETACHED_PROCESS = 0x00000008   # Windows: detach child from parent console
+CREATE_NO_WINDOW = 0x08000000   # Windows: suppress console window on subprocess spawn
 
 _UPDATE_BUTTON_FRAGMENTS = [
     "update available",
@@ -421,7 +422,8 @@ def trigger_autopulse(state, config, windows):
              "--message", full_message,
              "--no-brief"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=60
+            timeout=60,
+            creationflags=CREATE_NO_WINDOW,
         )
         if result.returncode == 0:
             safe_print(f"[hermes] autopulse sent: pulse #{pulse_num}")
