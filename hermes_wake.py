@@ -296,7 +296,7 @@ def send_wake_message(win, message, hermes_prefix="[hermes]"):
     time.sleep(0.1)
 
     # ── Pre-send state check (hermes#11) ─────────────────────────────────────
-    existing = _read_input_content(win)
+    existing = (_read_input_content(win) or "").strip()
     if existing:
         if existing.startswith(hermes_prefix):
             log(f"[hermes:wake] clearing stuck hermes input: {existing[:60]!r}")
