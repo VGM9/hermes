@@ -61,17 +61,20 @@ def get_session_custom_title(jsonl_path: str) -> Optional[str]:
 def switch_to_session_via_quick_pick(win, session_title: str, timeout_ms: int = 1500) -> bool:
     """Switch the active chat session in a VS Code window using the history Quick Pick.
 
-    SAFETY GUARANTEE: Keystrokes are ONLY injected if win is the confirmed
-    foreground window after focus acquisition. If any other window is in front,
-    this function returns False without sending a single keystroke.
+    SAFETY CONTRACT: This function MUST only be called when the caller has
+    verified — by its own means — that win is already the foreground window, OR
+    the caller has explicit user/agent permission to steal focus.
+
+    DO NOT call this from a polling loop. The daemon's poll_once must NOT call
+    find_target_window with session fallback enabled — that would type
+    "workbench.action.chat.history" into whatever the user is actively using.
 
     Flow:
-      1. Set focus to the VS Code window.
-      2. Verify win == GetForegroundWindow() — abort if not.
-      3. Open command palette: Ctrl+Shift+P via win.type_keys() (window-scoped).
-      4. Type 'workbench.action.chat.history' + Enter.
-      5. Type the session title prefix to filter.
-      6. Press Enter to select the first match.
+      1. Verify win IS already foreground — if not, abort with no side effects.
+      2. Re-confirm foreground after Ctrl+Shift+P.
+      3. Type 'workbench.action.chat.history' + Enter.
+      4. Re-confirm foreground before filter text.
+      5. Type session title prefix + Enter.
 
     Args:
         win: pywinauto Window object for the target VS Code window.
@@ -80,18 +83,23 @@ def switch_to_session_via_quick_pick(win, session_title: str, timeout_ms: int = 
 
     Returns:
         True if the Quick Pick sequence completed without exceptions.
-        False if foreground check fails — NO keystrokes sent in that case.
+        False if win is not already foreground — zero side effects in that case.
         Caller must verify the 'Set Agent' button state after returning True.
     """
     wait_unit = timeout_ms / 1000 / 5
 
     try:
-        win.set_focus()
-        time.sleep(wait_unit)
-
-        # SAFETY GATE: abort if we do not own the foreground
+        # SAFETY GATE: check foreground BEFORE set_focus.
+        # set_focus() itself steals focus — checking after is too late.
+        # If win is not already foreground, refuse to proceed entirely.
+        # This function must only be called with explicit intent to switch
+        # a session in the window the user is already looking at.
         if not is_foreground(win):
             return False
+
+        # Re-assert focus (may be a no-op if already foreground)
+        win.set_focus()
+        time.sleep(wait_unit)
 
         # All type_keys calls go to `win` directly (window-scoped in pywinauto)
         # Ctrl+Shift+P — open command palette

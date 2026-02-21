@@ -129,27 +129,16 @@ def find_target_window(session_jsonl: str, expected_agent_mode: str):
             return candidates[0]
         if len(candidates) > 1:
             # Multiple matches: parent-path disambiguation not yet implemented.
-            # Return first — better than nothing. Log for future hardening.
+            # Return first — better than nothing.
             return candidates[0]
 
-        # hermes#35: session history fallback — no window currently shows the
-        # expected agent mode, but workspace windows exist. Attempt to switch
-        # to the correct session via the history Quick Pick.
-        if workspace_windows and Path(session_jsonl).exists():
-            from core.ui_automation.session_switcher import switch_to_session_by_jsonl
-            for win in workspace_windows:
-                try:
-                    switched = switch_to_session_by_jsonl(win, session_jsonl, timeout_ms=2000)
-                    if switched:
-                        # Verify the switch landed on the right mode
-                        import time
-                        time.sleep(0.3)
-                        agent = find_agent_mode_in_window(win)
-                        if agent and agent.lower() == expected_agent_mode.lower():
-                            return win
-                except Exception:
-                    continue
-
+        # No window currently shows the expected agent mode.
+        # DO NOT attempt to switch sessions here — this function is called from
+        # the daemon's poll loop. Typing workbench.action.chat.history into
+        # whatever the user is looking at is not recovery. It is corruption.
+        # The session switcher path (session_switcher.py) must only be invoked
+        # with explicit intent from a user-triggered or agent-triggered action,
+        # never from a background poll.
         return None
 
     except Exception:
