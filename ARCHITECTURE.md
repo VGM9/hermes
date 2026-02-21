@@ -1,7 +1,7 @@
 # hermes — Architecture (live code map)
 
-**Last updated:** 2026-02-20 by POLARIS3/0.0.38  
-**Status:** Post-cleanup. 35 dead files archived. window_pattern antipattern removed. Clipboard paste implemented.
+**Last updated:** 2026-02-20 by POLARIS3/0.0.40  
+**Status:** chat/ module split complete. All hermes#10-16 closed. Two open: hermes#5 (UIA probe), hermes#7 (per-target wake).
 
 ---
 
@@ -10,7 +10,9 @@
 | File | Lines | How invoked | Purpose |
 |------|-------|-------------|---------|
 | `hermes_daemon.py` | 578 | `npm run daemon` | Main poll loop — triggers + autopulse |
-| `hermes_wake.py` | 490 | `npm run wake` / VS Code `folderOpen` task | One-shot: send wake message to chat |
+| `hermes_wake.py` | shim | legacy compat only | Forwards to `wake.py` |
+| `wake.py` | ~60 | `npm run wake` / VS Code `folderOpen` task | Post-reload wake: lock + wait-ready + send |
+| `send_message.py` | ~30 | spawned by daemon `trigger_autopulse` | Active-session message delivery (no lock, no readiness wait) |
 | `reload_and_wake.py` | 443 | `npm run reload` / `npm run reload-wake` | VS Code update detection + reload orchestration |
 | `hermes_config.py` | 138 | imported by all above | Config loader with local override merge |
 | `vscode_ground_truth.py` | 434 | imported by daemon + wake | Constants: class names, button names, paths |
@@ -27,6 +29,19 @@
 | `core/ui_automation/element_interaction.py` | 106 | click helpers |
 | `core/data_models/approval_request.py` | 172 | `ApprovalRequest` dataclass |
 | `core/parsers/request_text_parser.py` | 288 | request text extraction |
+
+---
+
+## Chat Module (`chat/`)
+
+| File | Exports | Purpose |
+|------|---------|---------|
+| `chat/lock.py` | `WakeLock` | Context manager: acquire/release wake lock file (atomic, stale-lock detection) |
+| `chat/input.py` | `wait_for_chat_ready`, `read_content`, `clear_input`, `clipboard_paste`, `find_send_button` | Chat input primitives |
+| `chat/send.py` | `send_message(win, message) -> bool`, `send_failure_to_chat` | Message delivery: ESC → pre-send check → clipboard paste → send button or Enter |
+| `chat/__init__.py` | `send_message`, `wait_for_chat_ready` | Public API |
+
+**Design principle:** `send_message` is pure delivery — no lock, no readiness wait, no wake semantics. Callers (`wake.py`, `send_message.py`) compose it with whatever ceremony the use case requires.
 
 ---
 
@@ -68,25 +83,24 @@ config["autopulse"]["session_jsonl"]
 
 ---
 
-## Message Send Path in `hermes_wake.py`
+## Message Send Path
 
+**Post-reload wake** (`wake.py`):
 ```
 _wake(args)
+  └─ WakeLock.__enter__()                — serialize concurrent wakes
   └─ load_config()
   └─ find_target_window(session_jsonl, agent_mode)
-  └─ wait_for_chat_ready(win, timeout)
-  └─ send_wake_message(win, message)
-       ├─ win.type_keys("{ESC}")          — dismiss autocomplete
-       ├─ _read_input_content(win)        — pre-send state check (hermes#11)
-       │    ├─ [hermes] prefix → _clear_input()
-       │    └─ user content → abort, return False
-       ├─ _clipboard_paste(win, message)  — Win32 clipboard + ^v (hermes#13)
-       │    saves/restores prior clipboard; instantaneous
-       ├─ _find_send_button(win)          — click Send btn or fall back to {ENTER}
-       └─ poll input cleared (2s timeout)
+  └─ wait_for_chat_ready(win, timeout)   — chat.input
+  └─ chat.send_message(win, message)     — chat.send
 ```
 
-**What was removed:** `type_keys(escaped, with_spaces=True, pause=0.02)` — per-character delays stole OS focus for the full message duration. Replaced with `ctypes` Win32 clipboard write + `^v`.
+**Daemon autopulse** (`send_message.py`):
+```
+main()
+  └─ find_target_window(session_jsonl, agent_mode)
+  └─ chat.send_message(win, message)     — no lock, no readiness wait
+```
 
 ---
 
@@ -99,7 +113,7 @@ trigger_autopulse(state, config, windows)
   ├─ flag_path = hermes_user_away.flag
   ├─ flag present → user_is_idle = True (explicit departure)
   ├─ flag absent + session_jsonl → check JSONL last human message timestamp
-  └─ elapsed >= interval_seconds → subprocess.run(hermes_wake.py, message)
+  └─ elapsed >= interval_seconds → subprocess.run(send_message.py, message)
 ```
 
 **Config keys (in `hermes_config.local.jsonc`):**
@@ -122,14 +136,12 @@ Any other message → user has returned: yield and wait.
 
 ---
 
-## Subprocess Spawn (daemon → wake)
+## Subprocess Spawn (daemon → send_message)
 
-`hermes_daemon.py` calls `hermes_wake.py` via:
+`hermes_daemon.py` calls `send_message.py` via:
 ```python
-subprocess.run([sys.executable, wake_script, "--config", config_path, "--message", msg], ...)
+subprocess.run([sys.executable, send_script, "--config", config_path, "--message", msg], ...)
 ```
-
-**Known issue:** No `creationflags=0x08000000` → spawns visible cmd window. See VGM9/hermes#12 (filed, not yet fixed).
 
 ---
 
@@ -160,8 +172,5 @@ These files are not imported by any live code. They exist for archaeology only.
 
 | Issue | Title | Severity |
 |-------|-------|----------|
-| hermes#12 | cmd window visible on daemon subprocess spawn | UX |
-| hermes#14 | busy-agent detection: suppress heartbeat if JSONL shows unmatched request | Logic |
-| hermes#10 | `reload_and_wake.py` still uses `window_pattern` for update cycle | Tech debt |
 | hermes#5 | UIA agent-mode label probe (POLARIS1 wall) | Capability |
 | hermes#7 | Per-target wake implementation (blocked on #5) | Feature |
