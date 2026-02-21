@@ -27,6 +27,7 @@ import time
 import json
 import argparse
 import subprocess
+import ctypes
 from pathlib import Path
 
 WAKE_PY = Path(r"C:\www\VGM9\_\AS\0.0.Q\_\scripts\wake.py")
@@ -213,6 +214,68 @@ def _clear_input(win):
         pass
 
 
+def _clipboard_paste(win, message):
+    """Write message to clipboard and paste into chat input via ^v.
+
+    Replaces type_keys(per_char, pause=0.02) with Win32 clipboard write + ^v.
+    Instantaneous: no per-character delay, no extended focus hold.
+    Saves and restores prior clipboard content. See VGM9/hermes#13.
+    """
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+
+    # Focus the chat input edit control
+    for edit in win.descendants(control_type="Edit"):
+        name = (edit.element_info.name or "").lower()
+        cls = edit.element_info.class_name or ""
+        if "chat input" in name or cls == "native-edit-context":
+            edit.click_input()
+            time.sleep(0.05)
+            break
+
+    def _clip_read():
+        text = ""
+        if user32.OpenClipboard(0):
+            if user32.IsClipboardFormatAvailable(CF_UNICODETEXT):
+                h = user32.GetClipboardData(CF_UNICODETEXT)
+                if h:
+                    ptr = kernel32.GlobalLock(h)
+                    if ptr:
+                        text = ctypes.wstring_at(ptr)
+                        kernel32.GlobalUnlock(h)
+            user32.CloseClipboard()
+        return text
+
+    def _clip_write(text):
+        encoded = (text + "\0").encode("utf-16-le")
+        h = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
+        if not h:
+            return
+        ptr = kernel32.GlobalLock(h)
+        if ptr:
+            ctypes.memmove(ptr, encoded, len(encoded))
+            kernel32.GlobalUnlock(h)
+        if user32.OpenClipboard(0):
+            user32.EmptyClipboard()
+            user32.SetClipboardData(CF_UNICODETEXT, h)
+            user32.CloseClipboard()
+
+    saved = _clip_read()
+    try:
+        _clip_write(message)
+        win.type_keys("^v")
+        time.sleep(0.1)
+    finally:
+        if saved:
+            _clip_write(saved)
+        else:
+            if user32.OpenClipboard(0):
+                user32.EmptyClipboard()
+                user32.CloseClipboard()
+
+
 def send_wake_message(win, message, hermes_prefix="[hermes]"):
     """Type and submit a message into the chat input.
 
@@ -243,11 +306,7 @@ def send_wake_message(win, message, hermes_prefix="[hermes]"):
             log(f"[hermes:wake] aborting — user content in input: {existing[:60]!r}")
             return False
 
-    escaped = (message
-               .replace("{", "{{").replace("}", "}}")
-               .replace("+", "{+}").replace("^", "{^}")
-               .replace("%", "{%}").replace("~", "{~}"))
-    win.type_keys(escaped, with_spaces=True, pause=0.02)
+    _clipboard_paste(win, message)
     time.sleep(0.2)
 
     # Prefer clicking the Send button — avoids Enter being swallowed by
