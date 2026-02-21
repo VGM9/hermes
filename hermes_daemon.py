@@ -268,6 +268,73 @@ class DaemonState:
 # Autopulse: user idle detection + periodic keep-alive
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _agent_is_busy(session_jsonl_path: str, hermes_prefix: str = "[hermes]",
+                   age_ceiling_seconds: float = 300) -> tuple:
+    """Return (is_busy, reason_str) — True if agent has unanswered non-hermes request.
+
+    Unmatched-request heuristic: the most recent genuine human message has no
+    response content AND was sent within age_ceiling_seconds → agent is processing it.
+
+    Age ceiling prevents permanently suppressing if a response goes missing or the
+    JSONL partial-write races with a read. See VGM9/hermes#14.
+    """
+    try:
+        path = Path(session_jsonl_path)
+        if not path.exists():
+            return False, "no jsonl"
+        lines = path.read_bytes().decode("utf-8", "replace").splitlines()
+        if not lines:
+            return False, "empty jsonl"
+
+        import copy
+        snap = json.loads(lines[0])
+        reqs = {i: copy.deepcopy(r) for i, r in enumerate(snap.get("v", {}).get("requests", [])) if r}
+        nxt = len(reqs)
+        for raw in lines[1:]:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                continue
+            kind, keys, val = obj.get("kind"), obj.get("k", []), obj.get("v")
+            if kind == 2 and keys == ["requests"] and isinstance(val, list):
+                for r in val:
+                    if isinstance(r, dict):
+                        reqs[nxt] = r
+                        nxt += 1
+                continue
+            if kind not in (1, 2) or len(keys) < 3 or keys[0] != "requests":
+                continue
+            ri, field = keys[1], keys[2]
+            if ri not in reqs:
+                reqs[ri] = {}
+            if kind == 1:
+                reqs[ri][field] = val
+            elif kind == 2 and field == "response" and isinstance(val, list):
+                reqs[ri].setdefault("response", []).extend(val)
+
+        # Walk from newest to oldest, find most recent genuine human message
+        for i in sorted(reqs.keys(), reverse=True):
+            req = reqs[i]
+            msg_text = req.get("message", "")
+            if not msg_text or str(msg_text).startswith(hermes_prefix):
+                continue
+            if req.get("response"):
+                return False, "response present"  # answered → not busy
+            ts_ms = req.get("timestamp", 0)
+            if ts_ms:
+                age = time.time() - ts_ms / 1000.0
+                if age < age_ceiling_seconds:
+                    return True, f"unanswered {age:.0f}s old"
+                return False, f"unanswered but stale ({age:.0f}s > ceiling)"
+            return False, "no timestamp"
+        return False, "no genuine messages"
+    except Exception as e:
+        return False, f"parse error: {e}"
+
+
 def _get_last_human_message_time(session_jsonl_path: str, hermes_prefix: str = "[hermes]"):
     """Return (timestamp_seconds, message_text) of the most recent genuine human message.
 
@@ -399,6 +466,17 @@ def trigger_autopulse(state, config, windows):
     elapsed = now - state.last_pulse_time
     if elapsed < interval:
         return False
+
+    # ── Busy-agent check (hermes#14) ─────────────────────────────────────────
+    # Suppress heartbeat if agent hasn't responded to latest request yet.
+    # Avoids queuing a nudge on top of an in-flight response.
+    # Steering messages are NOT suppressed (they target a different UX).
+    busy_ceiling = autopulse.get("busy_age_ceiling_seconds", 300)
+    if session_jsonl:
+        busy, busy_reason = _agent_is_busy(session_jsonl, hermes_prefix, busy_ceiling)
+        if busy:
+            safe_print(f"[hermes] autopulse: agent busy — suppressing ({busy_reason})")
+            return False
 
     # Craft pulse message — include radio check-in prompt for the agent
     from datetime import datetime, timezone
