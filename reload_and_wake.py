@@ -43,7 +43,7 @@ import argparse
 import json
 from pathlib import Path
 
-from core.ui_automation.window_detection import find_target_window
+from core.ui_automation.window_detection import find_target_window, is_foreground
 from chat.input import wait_for_chat_ready
 from chat.send import send_message as chat_send_message
 
@@ -51,7 +51,6 @@ from chat.send import send_message as chat_send_message
 try:
     import pywinauto
     from pywinauto import Application, findwindows
-    from pywinauto.keyboard import send_keys
 except ImportError:
     print("ERROR: pywinauto not installed")
     print("  pip install pywinauto")
@@ -142,21 +141,30 @@ def click_update_button(session_jsonl, agent_mode, detect_only=False):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def trigger_reload(window, title):
-    """Open command palette in target window and run Developer: Reload Window."""
+    """Open command palette in target window and run Developer: Reload Window.
+
+    NOTE: This is a FALLBACK path (Phase 1). Prefer sending
+    workbench.action.reloadWindow via qopilot/execute_command, which does not
+    require focus acquisition and carries no wrong-window risk.
+    """
     safe_print(f"[Phase 1] Triggering reload in: {title[:60]}...")
     window.set_focus()
     time.sleep(0.4)
 
-    # Open command palette (F1)
-    send_keys("{F1}")
+    # SAFETY GATE: verify we own the foreground before typing anything.
+    # If another window grabbed focus while set_focus() ran, abort.
+    if not is_foreground(window):
+        safe_print("[Phase 1] Foreground not acquired — aborting reload trigger")
+        return
+
+    # Open command palette. window.type_keys is window-scoped (not global).
+    window.type_keys("{F1}")
     time.sleep(0.6)
 
-    # Type the command
-    send_keys("Developer: Reload Window", with_spaces=True, pause=0.02)
+    window.type_keys("Developer: Reload Window", with_spaces=True, pause=0.02)
     time.sleep(0.4)
 
-    # Execute it
-    send_keys("{ENTER}")
+    window.type_keys("{ENTER}")
     time.sleep(0.3)
     safe_print("[Phase 1] Reload command sent")
 

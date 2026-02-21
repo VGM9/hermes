@@ -16,29 +16,6 @@ from vscode_ground_truth import (
     ACCEPT_TOOL_CONFIRMATION_ACTION_ID,
     SKIP_TOOL_CONFIRMATION_ACTION_ID,
 )
-from core.data_models.approval_request import UIElement
-
-
-def click_button(button: UIElement) -> bool:
-    """
-    Click a UI button.
-    
-    SIDE EFFECT: Modifies UI state by clicking the button.
-    
-    Args:
-        button: UIElement with element_ref to click
-    
-    Returns:
-        True if click succeeded, False otherwise.
-    """
-    try:
-        if hasattr(button, 'element_ref') and button.element_ref is not None:
-            button.element_ref.click_input()
-            return True
-    except Exception:
-        pass
-    
-    return False
 
 
 def execute_vscode_command(action_id: str) -> bool:

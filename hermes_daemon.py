@@ -31,6 +31,7 @@ Author: POLARIS1 (0.0.19), 2026-02-19
 
 import sys
 import os
+import ctypes
 import time
 import json
 import copy
@@ -42,7 +43,6 @@ from pathlib import Path
 try:
     import pywinauto
     from pywinauto import Application, findwindows
-    from pywinauto.keyboard import send_keys
 except ImportError:
     print("ERROR: pywinauto not installed. Run: pip install pywinauto")
     sys.exit(1)
@@ -657,12 +657,12 @@ def poll_once(state, config, config_path):
 
     # ── Foreground window exclusion ──────────────────────────────────────────
     # Never walk descendants of the window the user is actively using.
+    # ctypes (stdlib) replaces win32gui — no optional pywin32 dep, never fails silently.
     try:
-        import win32gui
-        focused_handle = win32gui.GetForegroundWindow()
-        windows = [w for w in windows if w["handle"] != focused_handle]
+        fg_handle = int(ctypes.windll.user32.GetForegroundWindow())
+        windows = [w for w in windows if w["handle"] != fg_handle]
     except Exception:
-        pass  # win32gui unavailable — agent_mode filter is sufficient
+        pass  # defensive: never block triggers on platform exception
 
     if not windows:
         return config  # active window is target — skip UI triggers
