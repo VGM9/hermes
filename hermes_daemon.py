@@ -265,6 +265,8 @@ class DaemonState:
         self.pulse_times: dict = {}        # {agent_mode: last_fire_timestamp}
         self.last_pulse_time = 0.0         # legacy alias (single-target compat)
         self.pulse_paused = False          # legacy alias (single-target compat)
+        # respawn: consecutive False pulse counts per target (hermes#32)
+        self.pulse_fail_counts: dict = {}  # {agent_mode: consecutive_false_count}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -438,7 +440,96 @@ def _fire_pulse(session_jsonl: str, agent_mode: str, pulse_message: str) -> bool
         return False
 
 
-def trigger_autopulse(state, config):
+def _find_latest_session_jsonl(old_jsonl_path: str) -> str:
+    """Scan the chatSessions directory for the newest .jsonl file.
+
+    Used after a successful sidecar respawn to discover the new session's
+    JSONL path. The workspace hash is stable; VS Code creates a new UUID file
+    in the same chatSessions directory.
+
+    Returns the path as a string, or the original path if nothing newer found.
+    """
+    try:
+        old = Path(old_jsonl_path)
+        sessions_dir = old.parent
+        if not sessions_dir.is_dir():
+            return old_jsonl_path
+        candidates = list(sessions_dir.glob("*.jsonl"))
+        if not candidates:
+            return old_jsonl_path
+        newest = max(candidates, key=lambda p: p.stat().st_mtime)
+        return str(newest)
+    except Exception:
+        return old_jsonl_path
+
+
+def _attempt_respawn(state: "DaemonState", target: dict, config_path: str) -> None:
+    """Spawn a dead sidecar and update the config's session_jsonl if it changes.
+
+    Calls spawn_sidecar.py with the target's respawn_mandate. On success,
+    scans the chatSessions directory for the newest JSONL and patches
+    hermes_config.local.jsonc with the new session path (option a from hermes#32).
+
+    Resets pulse_fail_counts for the agent_mode on any spawn attempt to
+    prevent repeated retries without a cooldown.
+    """
+    agent_mode = target.get("agent_mode", "")
+    mandate = target.get("respawn_mandate", "").strip()
+    old_jsonl = target.get("session_jsonl", "")
+
+    if not mandate:
+        safe_print(f"[hermes] respawn ✗ {agent_mode} — no respawn_mandate configured")
+        state.pulse_fail_counts[agent_mode] = 0  # reset to avoid loop
+        return
+
+    safe_print(f"[hermes] respawn → spawning {agent_mode}...")
+    state.pulse_fail_counts[agent_mode] = 0  # reset before attempt
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT_DIR / "spawn_sidecar.py"),
+             "--agent", agent_mode,
+             "--mandate", mandate],
+            timeout=30,
+            creationflags=CREATE_NO_WINDOW,
+        )
+    except Exception as exc:
+        safe_print(f"[hermes] respawn ✗ {agent_mode} — spawn_sidecar failed: {exc}")
+        return
+
+    if result.returncode != 0:
+        safe_print(f"[hermes] respawn ✗ {agent_mode} — spawn_sidecar exit {result.returncode}")
+        return
+
+    safe_print(f"[hermes] respawn ✓ {agent_mode} spawned")
+
+    # ── JSONL staleness resolution (hermes#32 option a) ──────────────────────
+    # After successful spawn, VS Code creates a new session JSONL. Discover it
+    # and patch the config file so future pulses use the new session.
+    if not old_jsonl:
+        return
+
+    new_jsonl = _find_latest_session_jsonl(old_jsonl)
+    if new_jsonl == old_jsonl:
+        safe_print(f"[hermes] respawn — JSONL unchanged (new session not yet created?)")
+        return
+
+    safe_print(f"[hermes] respawn — updating config JSONL: {Path(new_jsonl).name}")
+    try:
+        config_text = Path(config_path).read_text(encoding="utf-8")
+        old_name = Path(old_jsonl).name
+        new_name = Path(new_jsonl).name
+        if old_name in config_text:
+            updated = config_text.replace(old_name, new_name)
+            Path(config_path).write_text(updated, encoding="utf-8")
+            safe_print(f"[hermes] respawn — config patched: {old_name} → {new_name}")
+        else:
+            safe_print(f"[hermes] respawn ⚠ config JSONL not found for replacement: {old_name}")
+    except Exception as exc:
+        safe_print(f"[hermes] respawn ⚠ config patch failed: {exc}")
+
+
+def trigger_autopulse(state, config, config_path: str = ""):
     """Send periodic pulse messages to keep agents alive when user is idle.
 
     Supports multi-target via autopulse.targets list (hermes#18).
@@ -513,13 +604,23 @@ def trigger_autopulse(state, config):
         result = _fire_pulse(t_session_jsonl, t_agent_mode, t_message)
         if result is True:
             state.pulse_times[t_key] = now
-            safe_print(f"[hermes] autopulse ✓ {t_agent_mode}")
+            state.pulse_fail_counts[t_key] = 0  # reset on success
+            safe_print(f"[hermes] autopulse \u2713 {t_agent_mode}")
             fired_any = True
         elif result is None:
             state.pulse_times[t_key] = now  # update timer: don't pulse-storm
-            safe_print(f"[hermes] autopulse ⚠ {t_agent_mode} — suppressed (user content in input)")
+            state.pulse_fail_counts[t_key] = 0  # suppression is not failure
+            safe_print(f"[hermes] autopulse \u26a0 {t_agent_mode} \u2014 suppressed (user content in input)")
         else:
-            safe_print(f"[hermes] autopulse ✗ {t_agent_mode} — send_message.py failed")
+            fails = state.pulse_fail_counts.get(t_key, 0) + 1
+            state.pulse_fail_counts[t_key] = fails
+            safe_print(f"[hermes] autopulse \u2717 {t_agent_mode} \u2014 send_message.py failed (fail #{fails})")
+            # Respawn check: K consecutive failures (default K=2)
+            respawn_threshold = int(config.get("autopulse", {}).get("respawn_fail_threshold", 2))
+            respawn_mandate = target.get("respawn_mandate", "")
+            if fails >= respawn_threshold and respawn_mandate:
+                safe_print(f"[hermes] respawn triggered: {t_agent_mode} failed {fails} times")
+                _attempt_respawn(state, target, config_path)
 
     return fired_any
 
@@ -535,7 +636,7 @@ def poll_once(state, config, config_path):
     # Uses send_message.py per target — does its own window detection.
     # Fires here so multi-target config (no top-level session_jsonl) still works.
     if config.get("autopulse", {}).get("enabled"):
-        trigger_autopulse(state, config)
+        trigger_autopulse(state, config, config_path=str(config_path))
 
     # ── Session-anchored window selection for UI triggers (VGM9/hermes#10) ──
     # session_jsonl + agent_mode needed for update-button / reload-dialog only.
