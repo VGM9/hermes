@@ -168,9 +168,63 @@ These files are not imported by any live code. They exist for archaeology only.
 
 ---
 
-## Open Issues (filed, not yet implemented)
+## HERMES_QUEUE: Multi-Agent Handoff Protocol
 
-| Issue | Title | Severity |
-|-------|-------|----------|
-| hermes#5 | UIA agent-mode label probe (POLARIS1 wall) | Capability |
-| hermes#7 | Per-target wake implementation (blocked on #5) | Feature |
+When two agent sessions (e.g., POLARIS1 and POLARIS4) run in separate VS Code
+windows, they cannot inject messages into each other's chat box directly.
+The HERMES_QUEUE provides a file-based coordination channel.
+
+**Design doc:** `___/AS/HERMES_QUEUE/README.md` (VGM9 supernal space)
+
+### Queue directory
+
+```
+/c/www/VGM9/___/AS/HERMES_QUEUE/
+```
+
+### Message format
+
+Create a JSON file named `{timestamp}-from-{sender}-to-{target}.json`:
+
+```json
+{
+  "from": "POLARIS1",
+  "to": "POLARIS4",
+  "message": "[hermes] POLARIS1: your message here",
+  "created": "2026-02-21T00:00:00Z",
+  "expires_after": 120
+}
+```
+
+### Delivery lifecycle
+
+1. `poll_once()` checks the queue directory each cycle
+2. Files whose `to` matches `agent_mode` are picked up
+3. `send_wake_message()` delivers into the target window's chat box
+4. File is renamed to `{name}.delivered` — prevents duplicate delivery
+5. Files older than `expires_after` seconds become `{name}.expired`
+
+### Current state
+
+**Not yet implemented in `hermes_daemon.py`.** Queue directory and design exist.
+VGM9/hermes enhancement: tracked as a future feature.
+
+### Why `runSubagent` is preferred for reasoning
+
+```python
+# Virtual coordination — no physical window access needed
+runSubagent("POLARIS4", "What is your current patch count?")
+```
+
+Use HERMES_QUEUE only when the target agent must run tools from their own
+window (e.g., needs access to their session's tool scope).
+
+---
+
+## Open Issues
+
+No open issues as of 2026-02-21. Tracker: https://github.com/VGM9/hermes/issues
+
+Previously closed:
+- hermes#5 — UIA agent-mode label probe → implemented in `window_detection.py`
+- hermes#7 — Per-target wake → implemented via `autopulse.targets` config
