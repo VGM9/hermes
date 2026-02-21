@@ -35,7 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from pywinauto import Desktop
-from core.ui_automation.window_detection import find_agent_mode_in_window, VSCODE_WINDOW_CLASS_NAME
+from core.ui_automation.window_detection import find_agent_mode_in_window, VSCODE_WINDOW_CLASS_NAME, is_foreground
 from chat.send import send_message
 
 
@@ -109,13 +109,28 @@ def _click_set_agent_button(win) -> bool:
 def _switch_agent_mode(win, target_mode: str, timeout: float = 5.0) -> bool:
     """Click the Set Agent button, type the mode name, press Enter, verify.
 
-    Returns True if the mode switch was confirmed within timeout, else False.
+    SAFETY: Verifies win is the foreground window before any keystroke injection.
+    Returns False immediately (no keys sent) if another window is in front.
     """
+    # SAFETY GATE: verify we own the foreground before click_input steals focus
+    # into an already-active window. If the user is typing in this window, bail.
+    if not is_foreground(win):
+        return False
+
     if not _click_set_agent_button(win):
         return False
 
     # Give the picker time to open
     time.sleep(0.4)
+
+    # SAFETY GATE: check we still own foreground before typing
+    if not is_foreground(win):
+        # Picker may be open — close it without typing
+        try:
+            win.type_keys("{ESCAPE}")
+        except Exception:
+            pass
+        return False
 
     # Type the agent name to filter the list
     try:
@@ -124,6 +139,14 @@ def _switch_agent_mode(win, target_mode: str, timeout: float = 5.0) -> bool:
         return False
 
     time.sleep(0.3)
+
+    # SAFETY GATE: check foreground before sending Enter
+    if not is_foreground(win):
+        try:
+            win.type_keys("{ESCAPE}")
+        except Exception:
+            pass
+        return False
 
     # Press Enter to confirm selection
     try:

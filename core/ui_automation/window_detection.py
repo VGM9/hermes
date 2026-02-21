@@ -6,6 +6,7 @@ All identifiers imported from vscode_ground_truth.py.
 """
 
 from typing import List, Optional
+import ctypes
 import json
 import urllib.parse
 import pywinauto
@@ -21,6 +22,27 @@ from vscode_ground_truth import (
     CONTROL_TYPE_EDIT,
 )
 from core.data_models.approval_request import WindowInfo
+
+
+def is_foreground(win) -> bool:
+    """Return True only if win IS the current foreground window.
+
+    Use this gate before EVERY keystroke injection point. If any other window
+    has keyboard focus, keys go there — not to win. This makes cross-window
+    injection structurally impossible: if we are not foreground, we do not type.
+
+    Args:
+        win: pywinauto window object.
+
+    Returns:
+        True if win.handle == GetForegroundWindow(), False otherwise (including
+        on any exception — fail safe, never assume foreground).
+    """
+    try:
+        fg_handle = ctypes.windll.user32.GetForegroundWindow()
+        return int(fg_handle) == int(win.handle)
+    except Exception:
+        return False
 
 
 def find_agent_mode_in_window(win) -> Optional[str]:
@@ -86,12 +108,17 @@ def find_target_window(session_jsonl: str, expected_agent_mode: str):
         # Step 3+4: find windows containing workspace name, verify agent_mode
         desktop = Desktop(backend="uia")
         candidates = []
+        workspace_windows = []  # all workspace-matching windows (for session switch fallback)
         for win in desktop.windows():
             try:
                 if win.class_name() != VSCODE_WINDOW_CLASS_NAME:
                     continue
-                if workspace_name.lower() not in win.window_text().lower():
+                title = win.window_text()
+                if "visual studio code" not in title.lower():
+                    continue  # exclude other Electron apps (draw.io, etc.)
+                if workspace_name.lower() not in title.lower():
                     continue
+                workspace_windows.append(win)
                 agent = find_agent_mode_in_window(win)
                 if agent and agent.lower() == expected_agent_mode.lower():
                     candidates.append(win)
@@ -104,6 +131,25 @@ def find_target_window(session_jsonl: str, expected_agent_mode: str):
             # Multiple matches: parent-path disambiguation not yet implemented.
             # Return first — better than nothing. Log for future hardening.
             return candidates[0]
+
+        # hermes#35: session history fallback — no window currently shows the
+        # expected agent mode, but workspace windows exist. Attempt to switch
+        # to the correct session via the history Quick Pick.
+        if workspace_windows and Path(session_jsonl).exists():
+            from core.ui_automation.session_switcher import switch_to_session_by_jsonl
+            for win in workspace_windows:
+                try:
+                    switched = switch_to_session_by_jsonl(win, session_jsonl, timeout_ms=2000)
+                    if switched:
+                        # Verify the switch landed on the right mode
+                        import time
+                        time.sleep(0.3)
+                        agent = find_agent_mode_in_window(win)
+                        if agent and agent.lower() == expected_agent_mode.lower():
+                            return win
+                except Exception:
+                    continue
+
         return None
 
     except Exception:
