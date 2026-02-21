@@ -1,9 +1,9 @@
 {
   "agent": "POLARIS1",
-  "kq": "0.1.12",
+  "kq": "0.1.13",
   "status": "working",
   "mode": "auto-pilot (departure flag set)",
-  "current_task": "Maintenance — no open backlog items",
+  "current_task": "hermes#31 pending — awaiting LOGOS0 sidecar lifecycle spec",
   "last_updated": "2026-02-21",
   "session_jsonl": "62b28c3c-268d-4efe-9464-99d0247073ef.jsonl",
   "heartbeat_template": "heartbeat. keep working.",
@@ -11,7 +11,10 @@
     "hermes#24 FIXED: UI triggers skipped with targets-only config (PR #25, bade05d)",
     "POLARIS3 [B]: HERMES_QUEUE handoff docs in ARCHITECTURE.md (PR #27, fee3b84)",
     "POLARIS3 [C]: fast_patch_count.py validated on POLARIS1 session — Patch=6 (67db8c0)",
-    "hermes#28/29 FIXED: deliberate sidecar spawn — spawn_sidecar.py (PR #29, 6645d45)"
+    "hermes#28/29 FIXED: deliberate sidecar spawn — spawn_sidecar.py (PR #29, 6645d45)",
+    "hermes#30: polaris1 target/status cleanup (PR #30, 4fc2930)",
+    "EROS0 investigation: sidecar-lifecycle.md deposited (bd31ff7)",
+    "hermes#31 FILED: feat(sidecar) health monitoring + optional auto-respawn (awaiting LOGOS0 spec)"
   ],
-  "pending_issues": []
+  "pending_issues": [31]
 }
