@@ -322,13 +322,27 @@ def _wake(args):
         except Exception as _wake_err:
             log(f"wake.py --brief failed: {_wake_err}")
 
-    windows = find_vscode_windows(pattern)
-    if not windows:
-        log(f"No VS Code window matching '{pattern}' — giving up")
-        sys.exit(1)
-
+    # Session-anchored targeting (preferred): use session_jsonl + agent_mode
+    # to find the exact window. Falls back to window_pattern heuristic if
+    # session_jsonl is not configured (e.g. fresh install).
+    session_jsonl = config.get("autopulse", {}).get("session_jsonl", "")
     agent_mode = config.get("agent_mode", "").strip()
-    win = _select_wake_window(windows, agent_mode=agent_mode or None)
+
+    if session_jsonl and agent_mode:
+        from core.ui_automation.window_detection import find_target_window
+        win = find_target_window(session_jsonl, agent_mode)
+        if win is None:
+            log(f"Session-anchored targeting found no window "
+                f"(agent_mode={agent_mode!r}) — giving up")
+            sys.exit(1)
+        log(f"Agent mode match: '{agent_mode}' in window '{win.window_text()[:60]}'")
+    else:
+        # Legacy fallback: window_pattern + text-count heuristic
+        windows = find_vscode_windows(pattern)
+        if not windows:
+            log(f"No VS Code window matching '{pattern}' — giving up")
+            sys.exit(1)
+        win = _select_wake_window(windows, agent_mode=agent_mode or None)
     log(f"Waiting for chat ready (timeout={timeout}s)...")
 
     try:

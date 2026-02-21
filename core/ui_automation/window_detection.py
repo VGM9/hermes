@@ -6,6 +6,8 @@ All identifiers imported from vscode_ground_truth.py.
 """
 
 from typing import List, Optional
+import json
+import urllib.parse
 import pywinauto
 from pywinauto import Desktop
 
@@ -46,6 +48,66 @@ def find_agent_mode_in_window(win) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def find_target_window(session_jsonl: str, expected_agent_mode: str):
+    """Return the unique VS Code window hosting a given session + agent mode.
+
+    Implements the session-anchored targeting doctrine (HERMES_WINDOW_DETECTION):
+      1. session_jsonl path → workspace hash (from path structure)
+      2. workspaceStorage/{hash}/workspace.json → full workspace URI → name
+      3. Filter VS Code windows by title containing workspace name
+      4. Among those: verify agent_mode via 'Set Agent (Ctrl+.) - NAME' button
+
+    Returns the pywinauto Window object, or None if no unique match found.
+    Multiple matches logged but first returned (parent-path disambiguation TODO).
+    Zero matches returns None — caller must suppress action.
+    """
+    from pathlib import Path
+
+    try:
+        # Step 1: workspace hash from JSONL path
+        # .../workspaceStorage/{hash}/chatSessions/{id}.jsonl
+        hash_dir = Path(session_jsonl).parent.parent  # .../workspaceStorage/{hash}/
+        workspace_json_path = hash_dir / "workspace.json"
+        if not workspace_json_path.exists():
+            return None
+
+        ws = json.loads(workspace_json_path.read_text(encoding="utf-8"))
+        raw_uri = ws.get("folder") or ws.get("workspace", "")
+        if not raw_uri:
+            return None
+
+        # Step 2: URI → full filesystem path → workspace name stem
+        # "file:///C:/www/VGM9/..." → "C:/www/VGM9/..."
+        full_path = urllib.parse.unquote(raw_uri.removeprefix("file:///"))
+        workspace_name = Path(full_path).stem  # last segment, no extension
+
+        # Step 3+4: find windows containing workspace name, verify agent_mode
+        desktop = Desktop(backend="uia")
+        candidates = []
+        for win in desktop.windows():
+            try:
+                if win.class_name() != VSCODE_WINDOW_CLASS_NAME:
+                    continue
+                if workspace_name.lower() not in win.window_text().lower():
+                    continue
+                agent = find_agent_mode_in_window(win)
+                if agent and agent.lower() == expected_agent_mode.lower():
+                    candidates.append(win)
+            except Exception:
+                continue
+
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            # Multiple matches: parent-path disambiguation not yet implemented.
+            # Return first — better than nothing. Log for future hardening.
+            return candidates[0]
+        return None
+
+    except Exception:
+        return None
 
 
 def find_vscode_windows() -> List[WindowInfo]:

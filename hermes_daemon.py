@@ -159,7 +159,7 @@ def clear_pid():
 # ─────────────────────────────────────────────────────────────────────────────
 
 from core.ui_automation.window_detection import find_vscode_windows as _core_find_windows
-from core.ui_automation.window_detection import find_agent_mode_in_window
+from core.ui_automation.window_detection import find_agent_mode_in_window, find_target_window
 
 def find_vscode_windows(pattern=None):
     """Adapter: wraps core discovery, adds pattern filter, normalises to dict.
@@ -489,30 +489,35 @@ def poll_once(state, config, config_path):
     triggers = config["triggers"]
     pattern = config.get("window_pattern")
     agent_mode = config.get("agent_mode", "").strip()
+    session_jsonl = config.get("autopulse", {}).get("session_jsonl", "")
 
-    windows = find_vscode_windows(pattern)
+    # ── Session-anchored window selection (VGM9/hermes#10) ─────────────────
+    # Preferred path: derive target window from session_jsonl + agent_mode.
+    # Falls back to window_pattern + agent_mode filter for unconfigured installs.
+    if session_jsonl and agent_mode:
+        target_win = find_target_window(session_jsonl, agent_mode)
+        if target_win is None:
+            return config  # no unique target found — skip cycle
+        # Wrap in the same dict format the rest of poll_once expects
+        windows = [{"window": target_win, "handle": target_win.handle,
+                    "title": target_win.window_text()}]
+    else:
+        windows = find_vscode_windows(pattern)
 
-    # ── Agent mode filter (VGM9/hermes#5) ────────────────────────────────────
-    # If agent_mode is configured, only act on windows containing that agent's
-    # chat pane. This prevents polling / acting on the wrong window in
-    # multi-window multi-agent deployments.
-    # Without this filter, walking a non-target window's descendants fires
-    # AutomationFocusChangedEvent and steals focus from the user.
-    if agent_mode and windows:
-        matched = []
-        for entry in windows:
-            win = entry["window"]
-            if win is None:
-                continue
-            mode = find_agent_mode_in_window(win)
-            if mode and mode.lower() == agent_mode.lower():
-                matched.append(entry)
-        if matched:
-            windows = matched
-        else:
-            # No window matches yet — either loading or agent_mode wrong.
-            # Skip this cycle entirely rather than acting on random windows.
-            return config
+        # ── Agent mode filter (legacy fallback) ──────────────────────────────
+        if agent_mode and windows:
+            matched = []
+            for entry in windows:
+                win = entry["window"]
+                if win is None:
+                    continue
+                mode = find_agent_mode_in_window(win)
+                if mode and mode.lower() == agent_mode.lower():
+                    matched.append(entry)
+            if matched:
+                windows = matched
+            else:
+                return config
 
     # ── Foreground window exclusion ──────────────────────────────────────────
     # Never walk descendants of the window the user is actively using.
