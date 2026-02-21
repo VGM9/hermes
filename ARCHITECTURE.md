@@ -271,7 +271,75 @@ Windows already running the target mode are skipped.
 - Requires the agent mode to be installed in the target VS Code window's profile
 - If the agent picker does not open (e.g. window is not in focus), mode switch fails
 - Cannot target a specific VS Code window by session ID — uses workspace title hint
-- No daemon integration yet: call directly or from a VS Code task
+- Daemon integration: available via `_attempt_respawn()` (see Sidecar Lifecycle Monitoring below)
+
+---
+
+## Sidecar Lifecycle Monitoring
+
+After spawning a sidecar, hermes monitors its health via the autopulse delivery result and auto-respawns if it becomes unresponsive. Implemented in PR #33 (`2f6d825`), closes hermes#31 and hermes#32.
+
+### How it works
+
+1. `trigger_autopulse()` tracks consecutive delivery failures per target in `DaemonState.pulse_fail_counts`
+2. A `False` delivery result (window not found or delivery failed) increments the counter
+3. When the counter reaches `autopulse.respawn_fail_threshold` (default: 2) AND the target has `respawn_mandate` configured, `_attempt_respawn()` is called
+4. `_attempt_respawn()` calls `spawn_sidecar.py` to recreate the sidecar in a new VS Code window
+5. On successful respawn, `_find_latest_session_jsonl()` scans the chatSessions directory for the newest `.jsonl` (by mtime) and patches `hermes_config.local.jsonc` with the new session UUID
+
+### Counter resets
+
+| Condition | Effect |
+|-----------|--------|
+| `True` (delivery succeeded) | Counter reset to 0 |
+| `None` (suppressed — user content in input) | Counter reset to 0 (suppression ≠ failure) |
+| `False` (delivery failed) | Counter incremented |
+| Respawn attempt triggered | Counter reset to 0 before attempt (prevents retry storm) |
+
+### Configuration
+
+```jsonc
+{
+  "autopulse": {
+    "respawn_fail_threshold": 2,   // K consecutive failures before respawn (default: 2)
+    "targets": [
+      {
+        "session_jsonl": "C:\\...\\<uuid>.jsonl",
+        "agent_mode": "POLARIS1",
+        "message": "heartbeat. keep working.",
+        "interval_seconds": 300,
+        "respawn_mandate": "heartbeat. keep working."   // omit to disable auto-respawn
+      }
+    ]
+  }
+}
+```
+
+### JSONL staleness
+
+After a respawn the old `session_jsonl` path points to the dead session. `_find_latest_session_jsonl()` resolves this by:
+
+1. Extracting the chatSessions directory from the old path
+2. Scanning all `.jsonl` files by mtime
+3. Returning the newest (the new session's file)
+4. String-replacing the old UUID in `hermes_config.local.jsonc` with the new one
+
+`hermes_config.local.jsonc` is mutated on-disk after a successful respawn. No daemon restart needed — config hot-reloads each poll cycle.
+
+### Daemon state fields
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `pulse_times` | `dict[str, float]` | Last pulse timestamp per `agent_mode` |
+| `pulse_fail_counts` | `dict[str, int]` | Consecutive False-delivery count per `agent_mode` |
+
+### Key functions
+
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `_find_latest_session_jsonl(old_path)` | `hermes_daemon.py` | Returns newest `.jsonl` in chatSessions dir by mtime |
+| `_attempt_respawn(state, target, config_path)` | `hermes_daemon.py` | Calls `spawn_sidecar.py`, patches config UUID on success |
+| `trigger_autopulse(state, config, config_path)` | `hermes_daemon.py` | Orchestrates pulse delivery + failure tracking + respawn trigger |
 
 ---
 
