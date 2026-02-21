@@ -187,13 +187,64 @@ def _find_send_button(win):
     return None
 
 
-def send_wake_message(win, message):
-    # Dismiss any open autocomplete/picker before typing.
+def _read_input_content(win) -> str:
+    """Return current text in the chat input Edit control, or empty string."""
+    try:
+        for edit in win.descendants(control_type="Edit"):
+            name = (edit.element_info.name or "").lower()
+            cls = edit.element_info.class_name or ""
+            if "chat input" in name or cls == "native-edit-context":
+                return edit.window_text() or ""
+    except Exception:
+        pass
+    return ""
+
+
+def _clear_input(win):
+    """Select-all + Delete to clear the chat input box."""
+    try:
+        for edit in win.descendants(control_type="Edit"):
+            name = (edit.element_info.name or "").lower()
+            cls = edit.element_info.class_name or ""
+            if "chat input" in name or cls == "native-edit-context":
+                edit.click_input()
+                time.sleep(0.05)
+                win.type_keys("^a{DEL}")
+                time.sleep(0.1)
+                return
+    except Exception:
+        pass
+
+
+def send_wake_message(win, message, hermes_prefix="[hermes]"):
+    """Type and submit a message into the chat input.
+
+    Pre-send state contract (hermes#11):
+      - Empty input          → proceed normally
+      - Starts with prefix   → stuck prior hermes message, safe to clear
+      - User content         → abort, return False (do NOT overwrite user work)
+
+    Post-send verification: waits up to 2s for input to clear, logs if not.
+
+    Returns True on successful send, False if aborted due to user content or error.
+    """
+    # Dismiss any open autocomplete/picker before reading or typing.
     try:
         win.type_keys("{ESC}")
     except Exception:
         pass
     time.sleep(0.1)
+
+    # ── Pre-send state check (hermes#11) ─────────────────────────────────────
+    existing = _read_input_content(win)
+    if existing:
+        if existing.startswith(hermes_prefix):
+            log(f"[hermes:wake] clearing stuck hermes input: {existing[:60]!r}")
+            _clear_input(win)
+            time.sleep(0.1)
+        else:
+            log(f"[hermes:wake] aborting — user content in input: {existing[:60]!r}")
+            return False
 
     escaped = (message
                .replace("{", "{{").replace("}", "}}")
@@ -209,6 +260,15 @@ def send_wake_message(win, message):
         btn.click_input()
     else:
         win.type_keys("{ENTER}")
+
+    # ── Post-send verification ────────────────────────────────────────────────
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        time.sleep(0.2)
+        if not _read_input_content(win):
+            return True
+    log("[hermes:wake] warning: input not empty after send — may not have submitted")
+    return True  # best-effort; don't fail the wake for this
 
 
 def send_failure_to_chat(win, reason):
@@ -365,7 +425,10 @@ def _wake(args):
         except Exception:
             pass  # can't read value — proceed anyway
 
-        send_wake_message(win, message)
+        ok = send_wake_message(win, message)
+        if ok is False:
+            log("Pulse suppressed — user content in input box. Not a failure.")
+            sys.exit(0)
         log("Done")
     except Exception as e:
         reason = str(e)
