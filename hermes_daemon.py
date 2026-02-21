@@ -260,8 +260,11 @@ def trigger_reload_dialog(windows):
 class DaemonState:
     def __init__(self):
         self.last_update_click_time = 0.0  # debounce: don't click update button repeatedly
-        self.last_pulse_time = 0.0         # autopulse: last time we sent a pulse
-        self.pulse_paused = False           # autopulse: paused because user is active
+        # autopulse: per-target last-pulse timestamps keyed by agent_mode (hermes#18)
+        # Legacy fields kept for backward compat with any external code that reads them.
+        self.pulse_times: dict = {}        # {agent_mode: last_fire_timestamp}
+        self.last_pulse_time = 0.0         # legacy alias (single-target compat)
+        self.pulse_paused = False          # legacy alias (single-target compat)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -405,69 +408,99 @@ def _get_last_human_message_time(session_jsonl_path: str, hermes_prefix: str = "
         return 0.0, ""
 
 
+def _fire_pulse(session_jsonl: str, agent_mode: str, pulse_message: str) -> bool:
+    """Spawn send_message.py to deliver one pulse to a specific session+mode.
+
+    Fixes hermes#17: passes --session-jsonl and --agent-mode explicitly so
+    send_message.py can target the correct window rather than using placeholders.
+    """
+    wake_script = SCRIPT_DIR / "send_message.py"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(wake_script), pulse_message,
+             "--session-jsonl", session_jsonl,
+             "--agent-mode", agent_mode],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def trigger_autopulse(state, config, windows):
-    """Send periodic pulse message to keep agent alive when user is idle.
+    """Send periodic pulse messages to keep agents alive when user is idle.
+
+    Supports multi-target via autopulse.targets list (hermes#18).
+    Each target has: session_jsonl, agent_mode, message, interval_seconds.
+    If no targets list, falls back to single-target legacy config.
 
     User idle = most recent genuine human message is older than
     user_idle_threshold_seconds. When user returns (fresh human message),
     pulses pause until next idle window.
 
-    The pulse is delivered by spawning hermes_wake.py --message --no-brief,
-    which inherits the same agent_mode filter and lock serialization.
-
-    Uses VS Code's new "steering" capability (2026-02-20): if the agent is
+    Uses VS Code's steering capability (2026-02-20): if the agent is
     mid-response, the message queues instead of interrupting.
     """
     autopulse = config.get("autopulse", {})
     if not autopulse.get("enabled", False):
         return False
 
-    interval = float(autopulse.get("interval_seconds", 300))
-    idle_threshold = float(autopulse.get("user_idle_threshold_seconds", 120))
     hermes_prefix = autopulse.get("hermes_prefix", "[hermes]")
-    session_jsonl = autopulse.get("session_jsonl", "")
-    pulse_message = autopulse.get("message", "[hermes] pulse — user away. status: alive?")
-
+    idle_threshold = float(autopulse.get("user_idle_threshold_seconds", 120))
     now = time.time()
 
-    # Check user idle state
-    user_is_idle = True
-    user_age = float("inf")
-    last_human_msg = ""
+    # Build target list: multi-target (targets list) or single-target (legacy fields)
+    raw_targets = autopulse.get("targets")
+    if raw_targets:
+        targets = raw_targets  # list of {session_jsonl, agent_mode, message, interval_seconds}
+    else:
+        # Legacy single-target
+        session_jsonl = autopulse.get("session_jsonl", "")
+        agent_mode = config.get("agent_mode", "").strip()
+        if not session_jsonl or not agent_mode:
+            return False
+        targets = [{
+            "session_jsonl": session_jsonl,
+            "agent_mode": agent_mode,
+            "message": autopulse.get("message", "[hermes] pulse — user away. status: alive?"),
+            "interval_seconds": autopulse.get("interval_seconds", 300),
+        }]
 
-    if session_jsonl:
-        last_human_ts, last_human_msg = _get_last_human_message_time(session_jsonl, hermes_prefix)
-        user_age = now - last_human_ts if last_human_ts else float("inf")
-        user_is_idle = user_age > idle_threshold
+    fired_any = False
+    for target in targets:
+        t_session_jsonl = target.get("session_jsonl", "")
+        t_agent_mode = target.get("agent_mode", "")
+        t_message = target.get("message", "[hermes] pulse — user away. status: alive?")
+        t_interval = float(target.get("interval_seconds", 300))
+        t_key = t_agent_mode  # use agent_mode as state key
 
-    if not user_is_idle:
-        state.pulse_paused = True
-        state.last_pulse_time = now
-        return False
+        if not t_session_jsonl or not t_agent_mode:
+            continue
 
-    if state.pulse_paused:
-        state.pulse_paused = False
+        # Per-target idle check
+        user_is_idle = True
+        if t_session_jsonl:
+            last_human_ts, _ = _get_last_human_message_time(t_session_jsonl, hermes_prefix)
+            user_age = now - last_human_ts if last_human_ts else float("inf")
+            user_is_idle = user_age > idle_threshold
 
-    elapsed = now - state.last_pulse_time
-    if elapsed < interval:
-        return False
+        if not user_is_idle:
+            state.pulse_times[t_key] = now  # reset timer when user active
+            continue
 
-    # Replace hermes_wake.py with send_message.py
-    wake_script = SCRIPT_DIR / "send_message.py"
-    config_path = SCRIPT_DIR / "hermes_config.jsonc"
-    try:
-        result = subprocess.run(
-            [sys.executable, str(wake_script), pulse_message],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=60,
-            creationflags=CREATE_NO_WINDOW,
-        )
-        if result.returncode == 0:
-            state.last_pulse_time = now
-            return True
-    except Exception as e:
-        pass
-    return False
+        # Per-target interval check
+        last_pulse = state.pulse_times.get(t_key, 0)
+        if now - last_pulse < t_interval:
+            continue
+
+        # Fire
+        if _fire_pulse(t_session_jsonl, t_agent_mode, t_message):
+            state.pulse_times[t_key] = now
+            fired_any = True
+
+    return fired_any
 
 
 def poll_once(state, config, config_path):
