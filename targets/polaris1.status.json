@@ -1,6 +1,6 @@
 {
   "agent": "POLARIS1",
-  "kq": "0.1.14",
+  "kq": "0.1.16",
   "status": "working",
   "mode": "auto-pilot (departure flag set)",
   "current_task": "Maintenance — no open backlog items",
