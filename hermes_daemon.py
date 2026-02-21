@@ -76,13 +76,12 @@ def safe_print(msg):
 def load_config(path):
     """Load config JSON, return dict. Returns defaults on any error.
     If hermes_config.local.jsonc exists alongside path, its values overlay
-    the base config — used for per-workspace overrides (e.g. window_pattern).
+    the base config — used for per-workspace overrides.
     """
     defaults = {
         "triggers": {"update_button": True, "reload_dialog": True, "wake_on_reload": True},
         "wake_msg": "Window reloaded. #qhoami",
         "poll_interval": 0.8,
-        "window_pattern": "",
         "wake_debounce_seconds": 10,
     }
     def _parse(fpath):
@@ -161,17 +160,13 @@ def clear_pid():
 from core.ui_automation.window_detection import find_vscode_windows as _core_find_windows
 from core.ui_automation.window_detection import find_agent_mode_in_window, find_target_window
 
-def find_vscode_windows(pattern=None):
-    """Adapter: wraps core discovery, adds pattern filter, normalises to dict.
-    
-    Connects each discovered handle to a pywinauto window object so trigger
-    functions can call .descendants() and .click_input() on them.
+
+def find_vscode_windows():
+    """Return all VS Code windows as dicts with handle/title/window keys.
+    Use find_target_window(session_jsonl, agent_mode) for session-anchored targeting.
     """
-    windows = _core_find_windows()
-    if pattern:
-        windows = [w for w in windows if pattern.lower() in w.title.lower()]
     result = []
-    for w in windows:
+    for w in _core_find_windows():
         try:
             app = Application(backend="uia").connect(handle=w.handle)
             win_obj = app.window(handle=w.handle)
@@ -255,50 +250,6 @@ def trigger_reload_dialog(windows):
             pass
     return False
 
-
-def trigger_chat_timeout_restart(windows):
-    """Click retry after 'Chat took too long to get ready' error.
-
-    VS Code renders two button layouts for this error:
-    - A named 'Restart' button (first occurrence)
-    - A row of icon buttons below the response; the retry icon (⟳) has
-      accessible name 'Retry' or 'Regenerate response' with no visible text
-
-    Try named button first, then fall back to accessible-name scan.
-    See VSQode/hermes#5.
-    """
-    for entry in windows:
-        win = entry["window"]
-        if win is None:
-            continue
-        try:
-            descendants = win.descendants()
-            texts = [d.window_text().lower() for d in descendants if d.window_text()]
-            if not any("chat took too long" in t or "took too long to get ready" in t for t in texts):
-                continue
-
-            # Try named button first
-            for btn in win.descendants(control_type="Button"):
-                label = btn.window_text().lower()
-                if label == "restart":
-                    btn.click_input()
-                    safe_print("[hermes] Clicked chat timeout Restart button")
-                    return True
-
-            # Fall back: accessible name scan for retry/regenerate icon.
-            # Use exact matching (not substring) to avoid false-positive clicks on
-            # unrelated UI elements whose accessible name merely contains "retry"
-            # (e.g. search results, pagination buttons). See VSQode/hermes#6.
-            RETRY_EXACT_NAMES = {"retry", "regenerate", "regenerate response", "try again", "resend"}
-            for btn in win.descendants(control_type="Button"):
-                name = (btn.element_info.name or "").lower()
-                if name in RETRY_EXACT_NAMES:
-                    btn.click_input()
-                    safe_print(f"[hermes] Clicked chat retry icon: '{btn.element_info.name}'")
-                    return True
-        except Exception:
-            pass
-    return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -487,37 +438,20 @@ def poll_once(state, config, config_path):
     """One poll cycle. Mutates state. Hot-reloads config."""
     config = load_config(config_path)
     triggers = config["triggers"]
-    pattern = config.get("window_pattern")
     agent_mode = config.get("agent_mode", "").strip()
     session_jsonl = config.get("autopulse", {}).get("session_jsonl", "")
 
     # ── Session-anchored window selection (VGM9/hermes#10) ─────────────────
-    # Preferred path: derive target window from session_jsonl + agent_mode.
-    # Falls back to window_pattern + agent_mode filter for unconfigured installs.
-    if session_jsonl and agent_mode:
-        target_win = find_target_window(session_jsonl, agent_mode)
-        if target_win is None:
-            return config  # no unique target found — skip cycle
-        # Wrap in the same dict format the rest of poll_once expects
-        windows = [{"window": target_win, "handle": target_win.handle,
-                    "title": target_win.window_text()}]
-    else:
-        windows = find_vscode_windows(pattern)
-
-        # ── Agent mode filter (legacy fallback) ──────────────────────────────
-        if agent_mode and windows:
-            matched = []
-            for entry in windows:
-                win = entry["window"]
-                if win is None:
-                    continue
-                mode = find_agent_mode_in_window(win)
-                if mode and mode.lower() == agent_mode.lower():
-                    matched.append(entry)
-            if matched:
-                windows = matched
-            else:
-                return config
+    # session_jsonl + agent_mode are the canonical target anchors.
+    # Both must be present in hermes_config.local.jsonc (written by install-tasks.js).
+    if not (session_jsonl and agent_mode):
+        safe_print("[hermes] session_jsonl or agent_mode not configured — skipping cycle")
+        return config
+    target_win = find_target_window(session_jsonl, agent_mode)
+    if target_win is None:
+        return config  # no unique target found — skip cycle
+    windows = [{"window": target_win, "handle": target_win.handle,
+                "title": target_win.window_text()}]
 
     # ── Foreground window exclusion ──────────────────────────────────────────
     # Never walk descendants of the window the user is actively using.
@@ -542,13 +476,6 @@ def poll_once(state, config, config_path):
     # ── Reload dialog ────────────────────────────────────────────────────────
     if triggers.get("reload_dialog") and windows:
         trigger_reload_dialog(windows)
-
-    # ── Chat timeout Restart ─────────────────────────────────────────────────
-    # Text-gated: only fires when "Chat took too long to get ready" is visible.
-    # hermes_wake.py (folderOpen task) sends the initial wake message;
-    # this picks up the error if Copilot wasn't ready yet.
-    if triggers.get("chat_timeout_restart", True) and windows:
-        trigger_chat_timeout_restart(windows)
 
     # ── Autopulse ───────────────────────────────────────────────────────
     # Periodic keep-alive nudge when user victorbargains is away.

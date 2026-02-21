@@ -94,7 +94,6 @@ def log(msg):
 def load_config(path=DEFAULT_CONFIG):
     defaults = {
         "wake_msg": "Window reloaded. qhoami",
-        "window_pattern": "",
         "wake_timeout": 30,
     }
     def _parse(fpath):
@@ -117,17 +116,15 @@ def load_config(path=DEFAULT_CONFIG):
         return defaults
 
 
-def find_vscode_windows(pattern=None):
+def find_vscode_windows():
+    """Return all VS Code windows. Use find_target_window() for session-anchored targeting."""
     handles = findwindows.find_windows(class_name=VSCODE_CLASS)
     result = []
     for h in handles:
         try:
             app = Application(backend="uia").connect(handle=h)
             win = app.window(handle=h)
-            title = win.window_text()
-            if pattern and pattern.lower() not in title.lower():
-                continue
-            result.append({"handle": h, "title": title, "window": win})
+            result.append({"handle": h, "title": win.window_text(), "window": win})
         except Exception:
             pass
     return result
@@ -364,7 +361,6 @@ def main():
 
 def _wake(args):
     config = load_config(args.config)
-    pattern = config.get("window_pattern")
     timeout = int(config.get("wake_timeout", 30))
     message = args.message if args.message else config["wake_msg"]
 
@@ -382,27 +378,21 @@ def _wake(args):
         except Exception as _wake_err:
             log(f"wake.py --brief failed: {_wake_err}")
 
-    # Session-anchored targeting (preferred): use session_jsonl + agent_mode
-    # to find the exact window. Falls back to window_pattern heuristic if
-    # session_jsonl is not configured (e.g. fresh install).
+    # Session-anchored targeting (VGM9/hermes#10):
+    # session_jsonl + agent_mode are the canonical target anchors.
+    # Both must be present in hermes_config.local.jsonc (written by install-tasks.js).
     session_jsonl = config.get("autopulse", {}).get("session_jsonl", "")
     agent_mode = config.get("agent_mode", "").strip()
 
-    if session_jsonl and agent_mode:
-        from core.ui_automation.window_detection import find_target_window
-        win = find_target_window(session_jsonl, agent_mode)
-        if win is None:
-            log(f"Session-anchored targeting found no window "
-                f"(agent_mode={agent_mode!r}) — giving up")
-            sys.exit(1)
-        log(f"Agent mode match: '{agent_mode}' in window '{win.window_text()[:60]}'")
-    else:
-        # Legacy fallback: window_pattern + text-count heuristic
-        windows = find_vscode_windows(pattern)
-        if not windows:
-            log(f"No VS Code window matching '{pattern}' — giving up")
-            sys.exit(1)
-        win = _select_wake_window(windows, agent_mode=agent_mode or None)
+    if not (session_jsonl and agent_mode):
+        log("session_jsonl or agent_mode not configured in hermes_config.local.jsonc — giving up")
+        sys.exit(1)
+    from core.ui_automation.window_detection import find_target_window
+    win = find_target_window(session_jsonl, agent_mode)
+    if win is None:
+        log(f"No unique window found (agent_mode={agent_mode!r}) — giving up")
+        sys.exit(1)
+    log(f"Target: agent_mode='{agent_mode}' window='{win.window_text()[:60]}'")
     log(f"Waiting for chat ready (timeout={timeout}s)...")
 
     try:
