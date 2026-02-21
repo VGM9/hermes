@@ -1,20 +1,24 @@
 {
   "agent": "POLARIS3",
-  "kq": "0.0.37",
+  "kq": "0.0.38",
   "status": "working",
-  "mode": "auto-pilot",
-  "current_task": "HERMES_HEARTBEAT.epic.json + hermes: depart VS Code task",
+  "mode": "auto-pilot (departure flag set)",
+  "current_task": "Infinite queue — next: tackle hermes#14 (busy-agent detection)",
   "last_updated": "2026-02-20",
   "heartbeat_template": "heartbeat. keep working.",
-  "pending_issues": [
-    "VGM9/hermes#6 (multi-window epic — awaiting POLARIS1 implementation of #5 UIA probe)",
-    "VGM9/hermes#7 (wake-impl — POLARIS1 pending #5 wall)",
-    "VGM9/hermes#8 (config-schema — POLARIS1)",
-    "VGM9/hermes#9 (heartbeat trigger — FILED, awaiting #6/#7)"
+  "completed_this_session": [
+    "35 dead files archived",
+    "window_pattern antipattern removed from daemon + wake",
+    "trigger_chat_timeout_restart removed (dead code)",
+    "ARCHITECTURE.md written",
+    "hermes#13 FIXED: clipboard paste replaces type_keys per-char",
+    "hermes#12 FIXED: CREATE_NO_WINDOW on autopulse subprocess spawn",
+    "hermes config redirected to POLARIS3",
+    "departure flag created — heartbeats now targeting POLARIS3"
   ],
-  "blocking": ["VGM9/hermes#5 (UIA agent-mode-label probe — POLARIS1 wall)"],
-  "radio": {
-    "polaris1_status": "alive, patch 0.1.2, working on #5 UIA probe. No conflicts. Template aligned.",
-    "checked_at": "2026-02-20"
-  }
+  "pending_issues": [
+    "hermes#14 (busy-agent detection — JSONL unmatched-request heuristic)",
+    "hermes#10 reload_and_wake.py window_pattern (different use case, lower priority)",
+    "hermes#5 (UIA agent-mode label probe — POLARIS1 wall)"
+  ]
 }
