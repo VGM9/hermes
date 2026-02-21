@@ -544,8 +544,16 @@ def poll_once(state, config, config_path):
     except Exception:
         pass  # win32gui unavailable — skip guard, agent_mode filter is sufficient
 
+    # ── Autopulse fires before foreground guard ──────────────────────────────
+    # Autopulse spawns hermes_wake.py independently — it does not need
+    # pywinauto window walking, so it fires even when VS Code is the active
+    # window (e.g. after a previous pulse activated the chat).
+    if config.get("autopulse", {}).get("enabled"):
+        trigger_autopulse(state, config, windows)
+
     if not windows:
-        return config  # all candidate windows are foreground — skip
+        return config  # all candidate windows are foreground — skip UI triggers
+
     # ── Update button ──────────────────────────────────────────────────────
     if triggers.get("update_button") and windows:
         update_debounce = config.get("update_click_debounce_seconds", 30)
@@ -556,13 +564,6 @@ def poll_once(state, config, config_path):
     # ── Reload dialog ────────────────────────────────────────────────────────
     if triggers.get("reload_dialog") and windows:
         trigger_reload_dialog(windows)
-
-    # ── Autopulse ───────────────────────────────────────────────────────
-    # Periodic keep-alive nudge when user victorbargains is away.
-    # Pauses automatically when a genuine human message is detected.
-    # Uses VS Code steering (2026-02-20) to queue if agent is mid-response.
-    if config.get("autopulse", {}).get("enabled") and windows:
-        trigger_autopulse(state, config, windows)
 
     return config  # return hot-reloaded config for next interval
 
