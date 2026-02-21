@@ -539,7 +539,13 @@ def poll_once(state, config, config_path):
 
     # ── Session-anchored window selection for UI triggers (VGM9/hermes#10) ──
     # session_jsonl + agent_mode needed for update-button / reload-dialog only.
-    # If missing (multi-target-only config), skip UI triggers silently.
+    # Resolve session_jsonl from autopulse.targets if not set at top level
+    # (same fallback pattern as wake.py, hermes#22).
+    if not session_jsonl:
+        for t in config.get("autopulse", {}).get("targets", []):
+            if t.get("agent_mode") == agent_mode:
+                session_jsonl = t.get("session_jsonl", "")
+                break
     if not (session_jsonl and agent_mode):
         return config
     target_win = find_target_window(session_jsonl, agent_mode)
