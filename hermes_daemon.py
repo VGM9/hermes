@@ -427,90 +427,46 @@ def trigger_autopulse(state, config, windows):
     hermes_prefix = autopulse.get("hermes_prefix", "[hermes]")
     session_jsonl = autopulse.get("session_jsonl", "")
     pulse_message = autopulse.get("message", "[hermes] pulse — user away. status: alive?")
-    # departure flag: explicit "I'm leaving" signal from hermes:depart VS Code task
-    flag_path = SCRIPT_DIR / "hermes_user_away.flag"
-    flag_present = flag_path.exists()
 
     now = time.time()
 
-    # Check user idle state: departure flag (explicit) OR JSONL idle detection (passive).
-    # Flag present = user explicitly said they're leaving → always idle.
-    # Flag absent + session configured = check the JSONL timestamp.
-    # Flag absent + no session = assume idle (no way to detect user presence).
-    if flag_present:
-        user_is_idle = True
-        user_age = float("inf")
-        last_human_msg = ""
-    elif session_jsonl:
+    # Check user idle state
+    user_is_idle = True
+    user_age = float("inf")
+    last_human_msg = ""
+
+    if session_jsonl:
         last_human_ts, last_human_msg = _get_last_human_message_time(session_jsonl, hermes_prefix)
         user_age = now - last_human_ts if last_human_ts else float("inf")
         user_is_idle = user_age > idle_threshold
-    else:
-        user_is_idle = True
-        user_age = float("inf")
-        last_human_msg = ""
 
     if not user_is_idle:
-        # User is active — pause/reset pulse, don't send
-        if state.pulse_paused is False:
-            safe_print(f"[hermes] autopulse: user active (last msg {user_age:.0f}s ago) — pausing")
         state.pulse_paused = True
-        state.last_pulse_time = now  # reset so pulse doesn't fire immediately on next idle window
+        state.last_pulse_time = now
         return False
 
     if state.pulse_paused:
-        safe_print("[hermes] autopulse: user now idle — resuming pulse schedule")
         state.pulse_paused = False
 
-    # Check if interval has elapsed since last pulse
     elapsed = now - state.last_pulse_time
     if elapsed < interval:
         return False
 
-    # ── Busy-agent check (hermes#14) ─────────────────────────────────────────
-    # Suppress heartbeat if agent hasn't responded to latest request yet.
-    # Avoids queuing a nudge on top of an in-flight response.
-    # Steering messages are NOT suppressed (they target a different UX).
-    busy_ceiling = autopulse.get("busy_age_ceiling_seconds", 300)
-    if session_jsonl:
-        busy, busy_reason = _agent_is_busy(session_jsonl, hermes_prefix, busy_ceiling)
-        if busy:
-            safe_print(f"[hermes] autopulse: agent busy — suppressing ({busy_reason})")
-            return False
-
-    # Craft pulse message — include radio check-in prompt for the agent
-    from datetime import datetime, timezone
-    ts_str = datetime.now(timezone.utc).strftime("%H:%MZ")
-    pulse_num = int(elapsed // interval) if state.last_pulse_time > 0 else 1
-    full_message = (
-        f"{pulse_message}\n"
-        f"[{ts_str}] pulse #{pulse_num}. "
-        f"User victorbargains is away. Keep yourself alive. "
-        f"Check in with POLARIS3 via runSubagent if useful. "
-        f"Resume full-otto when user returns."
-    )
-
-    # Spawn hermes_wake.py to deliver — inherits agent_mode filter + lock
-    wake_script = SCRIPT_DIR / "hermes_wake.py"
+    # Replace hermes_wake.py with send_message.py
+    wake_script = SCRIPT_DIR / "send_message.py"
     config_path = SCRIPT_DIR / "hermes_config.jsonc"
     try:
         result = subprocess.run(
-            [sys.executable, str(wake_script),
-             "--config", str(config_path),
-             "--message", full_message,
-             "--no-brief"],
+            [sys.executable, str(wake_script), pulse_message],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=60,
             creationflags=CREATE_NO_WINDOW,
         )
         if result.returncode == 0:
-            safe_print(f"[hermes] autopulse sent: pulse #{pulse_num}")
             state.last_pulse_time = now
             return True
-        else:
-            safe_print(f"[hermes] autopulse failed (rc={result.returncode}): {result.stderr[:200]}")
     except Exception as e:
-        safe_print(f"[hermes] autopulse exception: {e}")
+        pass
     return False
 
 
