@@ -40,7 +40,12 @@ Revised: same session — fixed Phase 3 timing (was typing into dying window)
 import sys
 import time
 import argparse
+import json
 from pathlib import Path
+
+from core.ui_automation.window_detection import find_target_window
+from chat.input import wait_for_chat_ready
+from chat.send import send_message as chat_send_message
 
 # Check dependencies before importing
 try:
@@ -61,29 +66,6 @@ def safe_print(msg):
         print(msg)
     except UnicodeEncodeError:
         print(msg.encode('ascii', 'replace').decode('ascii'))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Window utilities
-# ─────────────────────────────────────────────────────────────────────────────
-
-from core.ui_automation.window_detection import find_vscode_windows as _core_find_windows
-
-def find_vscode_windows(pattern=None):
-    """Adapter: wraps core discovery, adds pattern filter, normalises to dict."""
-    windows = _core_find_windows()
-    if pattern:
-        windows = [w for w in windows if pattern.lower() in w.title.lower()]
-    return [{"handle": w.handle, "title": w.title, "window": None} for w in windows]
-
-
-def window_handle_alive(window):
-    """Return True if the window still exists and responds to title query."""
-    try:
-        window.window_text()
-        return True
-    except Exception:
-        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,31 +106,34 @@ def scan_for_update_button(windows):
     return None
 
 
-def click_update_button(window_pattern=None, poll_interval=1.0, timeout=10, detect_only=False):
+def click_update_button(session_jsonl, agent_mode, detect_only=False):
     """Find and click the VS Code update status bar button.
 
-    Polls for up to `timeout` seconds in case the button appears with a short delay.
+    Uses session-anchored targeting to locate the window.
     If detect_only=True, reports presence without clicking.
     Returns True if button was found (and clicked if not detect_only).
     """
-    safe_print(f"[Phase 0] Scanning for VS Code update button (up to {timeout}s)...")
-    start = time.time()
-    while time.time() - start < timeout:
-        windows = find_vscode_windows(window_pattern)
-        btn = scan_for_update_button(windows)
-        if btn:
-            if detect_only:
-                safe_print("[Phase 0] Update button detected (--detect-only, not clicking)")
-                return True
-            try:
-                btn.click_input()
-                safe_print("[Phase 0] Update button clicked — VS Code update restart triggered")
-                return True
-            except Exception as e:
-                safe_print(f"[Phase 0] Click failed: {e}")
-                return False
-        time.sleep(poll_interval)
-    safe_print("[Phase 0] No update button found within timeout")
+    safe_print("[Phase 0] Scanning for VS Code update button...")
+    win = find_target_window(session_jsonl, agent_mode)
+    if win is None:
+        safe_print("[Phase 0] No target window found")
+        return False
+
+    windows = [{"window": win}]
+    btn = scan_for_update_button(windows)
+    if btn:
+        if detect_only:
+            safe_print("[Phase 0] Update button detected (--detect-only, not clicking)")
+            return True
+        try:
+            btn.click_input()
+            safe_print("[Phase 0] Update button clicked — VS Code update restart triggered")
+            return True
+        except Exception as e:
+            safe_print(f"[Phase 0] Click failed: {e}")
+            return False
+
+    safe_print("[Phase 0] No update button found")
     return False
 
 
@@ -242,88 +227,43 @@ def wait_for_window_death(old_window, timeout=15):
     return False
 
 
-def wait_for_new_window(pattern, timeout=20):
-    """Wait for a new VS Code window matching pattern to appear. Returns (window, title) or (None, None)."""
-    safe_print(f"[Phase 3] Waiting for reloaded window to appear (up to {timeout}s)...")
+def wait_for_new_window(session_jsonl, agent_mode, timeout=20):
+    """Poll for reloaded VS Code window via session-anchored targeting."""
+    safe_print(f"[Phase 3] Waiting for reloaded window (up to {timeout}s)...")
     start = time.time()
     while time.time() - start < timeout:
-        windows = find_vscode_windows(pattern)
-        if windows:
-            entry = windows[0]
-            safe_print(f"[Phase 3] New window appeared: {entry['title'][:60]}...")
-            return entry["window"], entry["title"]
+        win = find_target_window(session_jsonl, agent_mode)
+        if win is not None:
+            safe_print(f"[Phase 3] New window appeared: {win.window_text()[:60]}")
+            return win, win.window_text()
         time.sleep(0.4)
     safe_print("[Phase 3] Timeout waiting for new window")
     return None, None
-
-
-def wait_for_chat_ready(window, timeout=30):
-    """Wait until the chat Edit control is visible, enabled, and interactive.
-
-    'Interactive' means we can click it and it accepts focus without throwing.
-    Returns the chat Edit control, or None on timeout.
-    """
-    safe_print(f"[Phase 3] Waiting for chat input to be ready (up to {timeout}s)...")
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            edits = window.descendants(control_type="Edit")
-            for edit in edits:
-                name = (edit.element_info.name or "").lower()
-                cls = edit.element_info.class_name or ""
-                if "chat input" in name or cls == "native-edit-context":
-                    if edit.is_visible() and edit.is_enabled():
-                        # Interaction probe: click it and verify no exception
-                        try:
-                            edit.click_input()
-                            safe_print(f"[Phase 3] Chat input ready after {time.time()-start:.1f}s")
-                            return edit
-                        except Exception:
-                            pass  # not truly ready yet
-        except Exception:
-            pass
-        time.sleep(0.5)
-    safe_print("[Phase 3] Timeout waiting for chat input readiness")
-    return None
-
-
-def send_wake_message(window, chat_input, message):
-    """Type and send wake message. chat_input is already focused from wait_for_chat_ready."""
-    safe_print(f"[Phase 3] Sending wake message: '{message}'")
-    try:
-        escaped = (message
-                   .replace('{', '{{').replace('}', '}}')
-                   .replace('+', '{+}').replace('^', '{^}')
-                   .replace('%', '{%}').replace('~', '{~}'))
-        window.type_keys(escaped, with_spaces=True, pause=0.02)
-        time.sleep(0.3)
-        window.type_keys("{ENTER}")
-        safe_print("[Phase 3] Wake message sent")
-        return True
-    except Exception as e:
-        safe_print(f"[Phase 3] Failed to send wake message: {e}")
-        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main orchestration
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run(phases, window_pattern, wake_msg, reload_timeout, dialog_timeout, dry_run, detect_only=False):
-    # Find target window
-    windows = find_vscode_windows(window_pattern)
-    if not windows:
-        safe_print(f"ERROR: No VS Code window matching '{window_pattern}' found")
-        available = find_vscode_windows()
-        if available:
-            safe_print("Available windows:")
-            for w in available:
-                safe_print(f"  {w['title'][:80]}")
+def load_config(path):
+    """Load JSONC config file, stripping comments."""
+    with open(path, 'r') as f:
+        content = f.read()
+    content = '\n'.join(line for line in content.splitlines() if not line.strip().startswith('//'))
+    return json.loads(content)
+
+
+def run(phases, config_path, wake_msg, reload_timeout, dialog_timeout, dry_run, detect_only=False):
+    config = load_config(config_path)
+    session_jsonl = config.get("autopulse", {}).get("session_jsonl", "")
+    agent_mode = config.get("agent_mode", "").strip()
+
+    win = find_target_window(session_jsonl, agent_mode)
+    if win is None:
+        safe_print(f"ERROR: No window found for agent_mode='{agent_mode}'")
         return 1
 
-    target = windows[0]
-    win = target["window"]
-    title = target["title"]
+    title = win.window_text()
     safe_print(f"Target window: {title[:70]}")
 
     if dry_run:
@@ -340,10 +280,7 @@ def run(phases, window_pattern, wake_msg, reload_timeout, dialog_timeout, dry_ru
         return 0
 
     if 0 in phases:
-        found = click_update_button(
-            window_pattern=window_pattern,
-            detect_only=detect_only,
-        )
+        found = click_update_button(session_jsonl, agent_mode, detect_only=detect_only)
         if not found and not detect_only:
             safe_print("[Phase 0] No update button — nothing to click")
             return 1
@@ -356,13 +293,9 @@ def run(phases, window_pattern, wake_msg, reload_timeout, dialog_timeout, dry_ru
 
     if 3 in phases:
         if 2 in phases:
-            # Chained from Phase 2: we have the OLD window handle and must wait for
-            # it to die before looking for the new one.
             wait_for_window_death(win, timeout=15)
-            new_win, new_title = wait_for_new_window(window_pattern, timeout=reload_timeout)
+            new_win, new_title = wait_for_new_window(session_jsonl, agent_mode, timeout=reload_timeout)
         else:
-            # Phase 3 started AFTER reload (e.g., via folderOpen task).
-            # The found window IS already the new (reloaded) window — skip death/rebirth cycle.
             safe_print("[Phase 3] Running post-reload (folderOpen mode) — skipping window death wait")
             new_win, new_title = win, title
 
@@ -370,14 +303,12 @@ def run(phases, window_pattern, wake_msg, reload_timeout, dialog_timeout, dry_ru
             safe_print("ERROR: Window did not reappear after reload")
             return 1
 
-        # Step 3c: wait for chat input to be truly interactive
         chat_input = wait_for_chat_ready(new_win, timeout=30)
         if not chat_input:
             safe_print("ERROR: Chat input never became ready")
             return 1
 
-        # Step 3d: type and send (input already focused by wait_for_chat_ready)
-        ok = send_wake_message(new_win, chat_input, wake_msg)
+        ok = chat_send_message(new_win, wake_msg)
         if ok:
             safe_print("\nDone. Extension loaded, wake message sent.")
             return 0
@@ -386,8 +317,6 @@ def run(phases, window_pattern, wake_msg, reload_timeout, dialog_timeout, dry_ru
             return 2
 
     return 0
-
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -400,8 +329,8 @@ def main():
              "use 2,3 only as fallback outside a workspace)"
     )
     parser.add_argument(
-        "--window-pattern", default="Visual Studio Code",
-        help="String to match in VS Code window title (default: any VS Code window)"
+        "--config", default=str(Path(__file__).parent / "hermes_config.jsonc"),
+        help="Path to hermes_config.jsonc (default: hermes_config.jsonc in script directory)"
     )
     parser.add_argument(
         "--wake-msg", default=DEFAULT_WAKE_MSG,
@@ -429,15 +358,13 @@ def main():
 
     sys.exit(run(
         phases=phases,
-        window_pattern=args.window_pattern,
+        config_path=args.config,
         wake_msg=args.wake_msg,
         reload_timeout=args.reload_timeout,
         dialog_timeout=args.dialog_timeout,
         dry_run=args.dry_run,
         detect_only=args.detect_only,
     ))
-
-
 
 if __name__ == "__main__":
     main()
