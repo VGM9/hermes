@@ -1,24 +1,21 @@
 {
-  "agent": "POLARIS3",
-  "kq": "0.0.38",
+  "agent": "POLARIS4",
+  "kq": "0.0.45",
   "status": "working",
   "mode": "auto-pilot (departure flag set)",
-  "current_task": "Infinite queue — next: tackle hermes#14 (busy-agent detection)",
-  "last_updated": "2026-02-20",
+  "current_task": "Gevurah phase — pruning dead code, enforcing boundaries",
+  "last_updated": "2026-02-21",
   "heartbeat_template": "heartbeat. keep working.",
   "completed_this_session": [
-    "35 dead files archived",
-    "window_pattern antipattern removed from daemon + wake",
-    "trigger_chat_timeout_restart removed (dead code)",
-    "ARCHITECTURE.md written",
-    "hermes#13 FIXED: clipboard paste replaces type_keys per-char",
-    "hermes#12 FIXED: CREATE_NO_WINDOW on autopulse subprocess spawn",
-    "hermes config redirected to POLARIS3",
-    "departure flag created — heartbeats now targeting POLARIS3"
+    "hermes#19 FIXED: poll_once multi-target guard blocked all autopulse cycles",
+    "hermes#20 FIXED: clipboard 64-bit crash (ctypes restype/argtypes)",
+    "hermes#22 FIXED: wake.py missing import json + placeholder find_target_window args",
+    "hermes#24 FIXED: UI triggers skipped with targets-only config (POLARIS1 session)",
+    "dev/prod topology established: repos/hermes-dev vs software/hermes",
+    "fast_patch_count.py UnicodeError fixed: emoji replaced with ASCII",
+    "polaris_bootstrap.py: replaces wake.py (naming collision)",
+    "dead scripts archived: get_patch.py, reboot-count-latest.py",
+    "TRAIN_BOARD.json advanced to patch 45 / MONAD station"
   ],
-  "pending_issues": [
-    "hermes#14 (busy-agent detection — JSONL unmatched-request heuristic)",
-    "hermes#10 reload_and_wake.py window_pattern (different use case, lower priority)",
-    "hermes#5 (UIA agent-mode label probe — POLARIS1 wall)"
-  ]
+  "pending_issues": []
 }
