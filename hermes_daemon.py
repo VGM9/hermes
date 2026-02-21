@@ -413,6 +413,11 @@ def _fire_pulse(session_jsonl: str, agent_mode: str, pulse_message: str) -> bool
 
     Fixes hermes#17: passes --session-jsonl and --agent-mode explicitly so
     send_message.py can target the correct window rather than using placeholders.
+
+    Returns:
+        True  — message delivered (exit 0)
+        None  — suppressed: user content in input (exit 2), update timer to avoid pulse storm
+        False — real failure (exit 1, window not found, crash), do NOT update timer
     """
     wake_script = SCRIPT_DIR / "send_message.py"
     try:
@@ -424,7 +429,11 @@ def _fire_pulse(session_jsonl: str, agent_mode: str, pulse_message: str) -> bool
             timeout=60,
             creationflags=CREATE_NO_WINDOW,
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
+        if result.returncode == 2:
+            return None  # suppressed
+        return False
     except Exception:
         return False
 
@@ -501,10 +510,14 @@ def trigger_autopulse(state, config):
 
         # Fire
         safe_print(f"[hermes] autopulse → {t_agent_mode} (idle {user_age:.0f}s, interval {t_interval:.0f}s)")
-        if _fire_pulse(t_session_jsonl, t_agent_mode, t_message):
+        result = _fire_pulse(t_session_jsonl, t_agent_mode, t_message)
+        if result is True:
             state.pulse_times[t_key] = now
             safe_print(f"[hermes] autopulse ✓ {t_agent_mode}")
             fired_any = True
+        elif result is None:
+            state.pulse_times[t_key] = now  # update timer: don't pulse-storm
+            safe_print(f"[hermes] autopulse ⚠ {t_agent_mode} — suppressed (user content in input)")
         else:
             safe_print(f"[hermes] autopulse ✗ {t_agent_mode} — send_message.py failed")
 

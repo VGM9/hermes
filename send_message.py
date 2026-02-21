@@ -89,7 +89,11 @@ def main():
         print(f"[send_message] No target window found for agent_mode={agent_mode!r}", file=sys.stderr)
         sys.exit(1)
 
-    if not send_message(win, args.message):
+    ok = send_message(win, args.message)
+    if ok is None:
+        print(f"[send_message] Pulse suppressed — user content in {agent_mode!r} input. Skipping.", file=sys.stderr)
+        sys.exit(2)  # suppressed: not an error, caller should update timer
+    if not ok:
         print("[send_message] Failed to send message.", file=sys.stderr)
         sys.exit(1)
 
