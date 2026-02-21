@@ -65,8 +65,12 @@ def _find_spawn_target(target_mode: str, workspace_hint: str = "") -> object:
         try:
             if win.class_name() != VSCODE_WINDOW_CLASS_NAME:
                 continue
-            title = win.window_text().lower()
-            if workspace_hint and workspace_hint.lower() not in title:
+            title = win.window_text()
+            # Chrome_WidgetWin_1 matches ALL Electron apps (draw.io, Slack, etc.)
+            # Require "Visual Studio Code" in title to ensure it's actually VS Code.
+            if "visual studio code" not in title.lower():
+                continue
+            if workspace_hint and workspace_hint.lower() not in title.lower():
                 continue
             current_mode = find_agent_mode_in_window(win)
             if current_mode and current_mode.lower() == target_mode.lower():
