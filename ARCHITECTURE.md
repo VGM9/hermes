@@ -221,6 +221,60 @@ window (e.g., needs access to their session's tool scope).
 
 ---
 
+## Deliberate Sidecar Spawn (`spawn_sidecar.py`)
+
+Implements the sidecar spawn protocol from `___/protocols/SEMVER.md` (KQ=0.1 spec).
+
+### What it does
+
+1. Finds a VS Code window that does **not** already have the target agent mode
+2. Clicks the `Set Agent (Ctrl+.)` button to open the agent picker
+3. Types the target agent name to filter, presses Enter to confirm
+4. Polls `find_agent_mode_in_window()` to verify mode switched
+5. Delivers the mandate message via `send_message()`
+
+### CLI usage
+
+```bash
+# Spawn POLARIS1 in any available window with a mandate
+python3 spawn_sidecar.py --agent POLARIS1 --mandate "Your initial mandate here"
+
+# Constrain to a specific workspace window
+python3 spawn_sidecar.py --agent POLARIS1 --mandate "..." --workspace agent-hub
+
+# Dry run — find target window but do not switch mode
+python3 spawn_sidecar.py --agent POLARIS1 --mandate "..." --dry-run
+
+# npm shortcut
+npm run spawn:sidecar -- --agent POLARIS1 --mandate "..."
+```
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success — mode switched and mandate delivered |
+| 1 | No suitable window found |
+| 2 | Mode switch failed or timed out |
+| 3 | Mandate delivery failed |
+
+### Window selection logic
+
+Preference order for spawn target:
+1. Window with **no** agent mode set (fresh/empty sidebar)
+2. Window with a **different** agent mode set
+
+Windows already running the target mode are skipped.
+
+### Limitations
+
+- Requires the agent mode to be installed in the target VS Code window's profile
+- If the agent picker does not open (e.g. window is not in focus), mode switch fails
+- Cannot target a specific VS Code window by session ID — uses workspace title hint
+- No daemon integration yet: call directly or from a VS Code task
+
+---
+
 ## Open Issues
 
 No open issues as of 2026-02-21. Tracker: https://github.com/VGM9/hermes/issues
