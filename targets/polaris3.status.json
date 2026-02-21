@@ -14,8 +14,12 @@
     "dev/prod topology established: repos/hermes-dev vs software/hermes",
     "fast_patch_count.py UnicodeError fixed: emoji replaced with ASCII",
     "polaris_bootstrap.py: replaces wake.py (naming collision)",
-    "dead scripts archived: get_patch.py, reboot-count-latest.py",
-    "TRAIN_BOARD.json advanced to patch 45 / MONAD station"
+    "6 dead scripts archived: CATALOG.md updated (Gevurah audit)",
+    "scripts/README.md rewritten: all 24 active scripts documented",
+    "TRAIN_BOARD.json: patch 45 MONAD, open_questions resolved, queue counts zeroed",
+    "POLARIS1.agent.md: state ordering fixed (8-12 ascending, duplicate removed)",
+    "hermes#26 closed: spawn_sidecar.py confirmed in prod (6645d45), issue closed"
   ],
-  "pending_issues": []
+  "pending_issues": [],
+  "gevurah_phase_complete": true
 }
