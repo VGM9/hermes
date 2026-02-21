@@ -429,12 +429,15 @@ def _fire_pulse(session_jsonl: str, agent_mode: str, pulse_message: str) -> bool
         return False
 
 
-def trigger_autopulse(state, config, windows):
+def trigger_autopulse(state, config):
     """Send periodic pulse messages to keep agents alive when user is idle.
 
     Supports multi-target via autopulse.targets list (hermes#18).
     Each target has: session_jsonl, agent_mode, message, interval_seconds.
     If no targets list, falls back to single-target legacy config.
+
+    Does its own window detection per target via send_message.py.
+    Does not use pywinauto window walking — safe to call before find_target_window.
 
     User idle = most recent genuine human message is older than
     user_idle_threshold_seconds. When user returns (fresh human message),
@@ -492,13 +495,18 @@ def trigger_autopulse(state, config, windows):
 
         # Per-target interval check
         last_pulse = state.pulse_times.get(t_key, 0)
-        if now - last_pulse < t_interval:
+        since_last = now - last_pulse
+        if since_last < t_interval:
             continue
 
         # Fire
+        safe_print(f"[hermes] autopulse → {t_agent_mode} (idle {user_age:.0f}s, interval {t_interval:.0f}s)")
         if _fire_pulse(t_session_jsonl, t_agent_mode, t_message):
             state.pulse_times[t_key] = now
+            safe_print(f"[hermes] autopulse ✓ {t_agent_mode}")
             fired_any = True
+        else:
+            safe_print(f"[hermes] autopulse ✗ {t_agent_mode} — send_message.py failed")
 
     return fired_any
 
@@ -510,48 +518,44 @@ def poll_once(state, config, config_path):
     agent_mode = config.get("agent_mode", "").strip()
     session_jsonl = config.get("autopulse", {}).get("session_jsonl", "")
 
-    # ── Session-anchored window selection (VGM9/hermes#10) ─────────────────
-    # session_jsonl + agent_mode are the canonical target anchors.
-    # Both must be present in hermes_config.local.jsonc (written by install-tasks.js).
+    # ── Autopulse is independent of UI-trigger window detection ─────────────
+    # Uses send_message.py per target — does its own window detection.
+    # Fires here so multi-target config (no top-level session_jsonl) still works.
+    if config.get("autopulse", {}).get("enabled"):
+        trigger_autopulse(state, config)
+
+    # ── Session-anchored window selection for UI triggers (VGM9/hermes#10) ──
+    # session_jsonl + agent_mode needed for update-button / reload-dialog only.
+    # If missing (multi-target-only config), skip UI triggers silently.
     if not (session_jsonl and agent_mode):
-        safe_print("[hermes] session_jsonl or agent_mode not configured — skipping cycle")
         return config
     target_win = find_target_window(session_jsonl, agent_mode)
     if target_win is None:
-        return config  # no unique target found — skip cycle
+        return config  # no unique target found — skip UI triggers
     windows = [{"window": target_win, "handle": target_win.handle,
                 "title": target_win.window_text()}]
 
     # ── Foreground window exclusion ──────────────────────────────────────────
     # Never walk descendants of the window the user is actively using.
-    # Walking any non-foreground window fires AutomationFocusChangedEvent.
-    # With agent_mode filtering above, this is belt-and-suspenders protection.
     try:
         import win32gui
         focused_handle = win32gui.GetForegroundWindow()
         windows = [w for w in windows if w["handle"] != focused_handle]
     except Exception:
-        pass  # win32gui unavailable — skip guard, agent_mode filter is sufficient
-
-    # ── Autopulse fires before foreground guard ──────────────────────────────
-    # Autopulse spawns hermes_wake.py independently — it does not need
-    # pywinauto window walking, so it fires even when VS Code is the active
-    # window (e.g. after a previous pulse activated the chat).
-    if config.get("autopulse", {}).get("enabled"):
-        trigger_autopulse(state, config, windows)
+        pass  # win32gui unavailable — agent_mode filter is sufficient
 
     if not windows:
-        return config  # all candidate windows are foreground — skip UI triggers
+        return config  # active window is target — skip UI triggers
 
     # ── Update button ──────────────────────────────────────────────────────
-    if triggers.get("update_button") and windows:
+    if triggers.get("update_button"):
         update_debounce = config.get("update_click_debounce_seconds", 30)
         if time.time() - state.last_update_click_time > update_debounce:
             if trigger_update_button(windows):
                 state.last_update_click_time = time.time()
 
     # ── Reload dialog ────────────────────────────────────────────────────────
-    if triggers.get("reload_dialog") and windows:
+    if triggers.get("reload_dialog"):
         trigger_reload_dialog(windows)
 
     return config  # return hot-reloaded config for next interval

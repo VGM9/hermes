@@ -15,6 +15,15 @@ GMEM_MOVEABLE = 0x0002
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
+# Without explicit restype, ctypes defaults to c_int (32-bit), which truncates
+# 64-bit pointers on x64 Windows and causes access violations in wstring_at/memmove.
+kernel32.GlobalLock.restype = ctypes.c_void_p
+kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+kernel32.GlobalAlloc.restype = ctypes.c_void_p
+user32.GetClipboardData.restype = ctypes.c_void_p
+user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+
 def wait_for_chat_ready(win, timeout=30):
     """Block until chat Edit is visible+enabled, or timeout expires."""
     end = time.time() + timeout
