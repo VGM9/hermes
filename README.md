@@ -122,6 +122,71 @@ elif decision.action == 'SKIP':
     print(f"Skipped: {decision.reason}")
 ```
 
+## Daemon, Wake & Sidecar Capabilities
+
+Beyond approval detection, hermes provides a long-running daemon for agent autopulse, inter-session wake messaging, sidecar spawn, and auto-respawn. These capabilities were added after the v0.1.0 approval-detection work.
+
+### Daemon
+
+```bash
+npm run daemon:ensure   # idempotent start — no-op if already running
+npm run daemon:status   # check PID and health
+npm run daemon:stop     # graceful shutdown
+```
+
+The daemon polls on a configurable interval. It detects VS Code update buttons, reload dialogs, and fires autopulse heartbeats to target agent sessions.
+
+### Sending wake messages
+
+```bash
+# Send a one-off message to a specific agent session
+python3 send_message.py --agent-mode POLARIS1 --message "heartbeat. keep working."
+
+# via npm
+npm run wake  # uses hermes_wake.py with configured defaults
+```
+
+### Autopulse (daemon-managed heartbeats)
+
+Configure `autopulse.targets` in `hermes_config.local.jsonc`:
+
+```jsonc
+{
+  "autopulse": {
+    "enabled": true,
+    "targets": [
+      {
+        "session_jsonl": "C:\\...\\<uuid>.jsonl",
+        "agent_mode": "POLARIS1",
+        "message": "heartbeat. keep working.",
+        "interval_seconds": 300,
+        "respawn_mandate": "heartbeat. keep working."  // enables auto-respawn
+      }
+    ]
+  }
+}
+```
+
+The daemon delivers the `message` to the target agent when the user is idle (departure flag set). If delivery fails K=2 consecutive times and `respawn_mandate` is set, `spawn_sidecar.py` is called to recreate the session.
+
+### Sidecar spawn
+
+```bash
+# Spawn an agent mode in a free VS Code window with a mandate
+python3 spawn_sidecar.py --agent POLARIS1 --mandate "heartbeat. keep working."
+npm run spawn:sidecar -- --agent POLARIS1 --mandate "..."
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for full details on deliberate sidecar spawn, lifecycle monitoring, and auto-respawn behaviour.
+
+### VS Code update automation
+
+```bash
+npm run update:detect   # report if update button is present (no click)
+npm run update:apply    # click update + handle reload dialog
+npm run reload:phase2   # watch for reload dialog and click Yes
+```
+
 ## Configuration
 
 ### Policy File Format
