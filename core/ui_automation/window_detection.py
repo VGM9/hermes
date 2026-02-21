@@ -6,6 +6,7 @@ All identifiers imported from vscode_ground_truth.py.
 """
 
 from typing import List, Optional
+import ctypes
 import json
 import urllib.parse
 import pywinauto
@@ -21,6 +22,27 @@ from vscode_ground_truth import (
     CONTROL_TYPE_EDIT,
 )
 from core.data_models.approval_request import WindowInfo
+
+
+def is_foreground(win) -> bool:
+    """Return True only if win IS the current foreground window.
+
+    Use this gate before EVERY keystroke injection point. If any other window
+    has keyboard focus, keys go there — not to win. This makes cross-window
+    injection structurally impossible: if we are not foreground, we do not type.
+
+    Args:
+        win: pywinauto window object.
+
+    Returns:
+        True if win.handle == GetForegroundWindow(), False otherwise (including
+        on any exception — fail safe, never assume foreground).
+    """
+    try:
+        fg_handle = ctypes.windll.user32.GetForegroundWindow()
+        return int(fg_handle) == int(win.handle)
+    except Exception:
+        return False
 
 
 def find_agent_mode_in_window(win) -> Optional[str]:

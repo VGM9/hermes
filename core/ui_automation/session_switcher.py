@@ -21,6 +21,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from .window_detection import is_foreground
+
 
 # ── JSONL title extraction ────────────────────────────────────────────────────
 
@@ -59,55 +61,66 @@ def get_session_custom_title(jsonl_path: str) -> Optional[str]:
 def switch_to_session_via_quick_pick(win, session_title: str, timeout_ms: int = 1500) -> bool:
     """Switch the active chat session in a VS Code window using the history Quick Pick.
 
+    SAFETY GUARANTEE: Keystrokes are ONLY injected if win is the confirmed
+    foreground window after focus acquisition. If any other window is in front,
+    this function returns False without sending a single keystroke.
+
     Flow:
       1. Set focus to the VS Code window.
-      2. Open command palette: Ctrl+Shift+P.
-      3. Type 'workbench.action.chat.history' + Enter to open the Quick Pick.
-      4. Type the session title prefix to filter.
-      5. Press Enter to select the first match.
-      6. Wait for the session to load.
+      2. Verify win == GetForegroundWindow() — abort if not.
+      3. Open command palette: Ctrl+Shift+P via win.type_keys() (window-scoped).
+      4. Type 'workbench.action.chat.history' + Enter.
+      5. Type the session title prefix to filter.
+      6. Press Enter to select the first match.
 
     Args:
         win: pywinauto Window object for the target VS Code window.
         session_title: The exact customTitle of the session to switch to.
-        timeout_ms: Total wait budget in milliseconds (default 1500 = 1.5s).
+        timeout_ms: Total wait budget in milliseconds.
 
     Returns:
         True if the Quick Pick sequence completed without exceptions.
-        The caller should verify the "Set Agent" button after returning.
+        False if foreground check fails — NO keystrokes sent in that case.
+        Caller must verify the 'Set Agent' button state after returning True.
     """
-    from pywinauto.keyboard import send_keys  # type: ignore[import]
-
-    wait_unit = timeout_ms / 1000 / 5  # divide budget into 5 parts
+    wait_unit = timeout_ms / 1000 / 5
 
     try:
         win.set_focus()
-        time.sleep(wait_unit)  # wait for focus
-
-        # Open command palette
-        send_keys("^+p")
-        time.sleep(wait_unit)  # wait for palette to render
-
-        # Type command ID — direct ID is locale-independent
-        for char in "workbench.action.chat.history":
-            send_keys(char, pause=0.02)
         time.sleep(wait_unit)
 
-        send_keys("{ENTER}")
+        # SAFETY GATE: abort if we do not own the foreground
+        if not is_foreground(win):
+            return False
+
+        # All type_keys calls go to `win` directly (window-scoped in pywinauto)
+        # Ctrl+Shift+P — open command palette
+        win.type_keys("^+p", pause=0.05)
+        time.sleep(wait_unit)
+
+        # Verify still foreground before typing command
+        if not is_foreground(win):
+            win.type_keys("{ESCAPE}")  # close palette if open
+            return False
+
+        # Type command ID and confirm
+        win.type_keys("workbench.action.chat.history", pause=0.02, with_spaces=False)
+        time.sleep(wait_unit)
+        win.type_keys("{ENTER}", pause=0.05)
         time.sleep(wait_unit)  # wait for Quick Pick to open
 
-        # Filter by session title — type first 30 chars (enough to be unique)
+        # Verify still foreground before typing filter
+        if not is_foreground(win):
+            win.type_keys("{ESCAPE}")
+            return False
+
+        # Filter by session title prefix
         filter_text = session_title[:30]
-        for char in filter_text:
-            # Escape braces for send_keys
-            if char in ("{", "}"):
-                send_keys("{%s}" % char, pause=0.02)
-            else:
-                send_keys(char, pause=0.02)
+        win.type_keys(filter_text, pause=0.02, with_spaces=True)
         time.sleep(wait_unit)
 
-        send_keys("{ENTER}")
-        time.sleep(wait_unit / 2)  # wait for session load
+        win.type_keys("{ENTER}", pause=0.05)
+        time.sleep(wait_unit / 2)
 
         return True
 

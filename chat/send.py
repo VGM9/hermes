@@ -7,7 +7,7 @@ Provides functions for sending messages via the chat interface.
 """
 
 import time
-from .input import read_content, clear_input, clipboard_paste, find_send_button
+from .input import read_content, clear_input, clipboard_paste, find_send_button, _is_foreground
 
 def send_message(win, message, hermes_prefix="[hermes]"):
     """Type and submit a message into the chat input.
@@ -15,8 +15,15 @@ def send_message(win, message, hermes_prefix="[hermes]"):
     Returns:
         True  — delivered
         None  — suppressed: user content in input box (not a failure)
-        False — delivery failure (should not happen, but defensive)
+        False — delivery failure or foreground check failed
     """
+    # SAFETY GATE: only operate on the foreground window.
+    # If we are not foreground, we must not touch the input box, paste
+    # into it, or click Send — any of those would corrupt the user's
+    # active work in another window.
+    if not _is_foreground(win):
+        return False
+
     try:
         win.type_keys("{ESC}")
     except Exception:
@@ -33,6 +40,14 @@ def send_message(win, message, hermes_prefix="[hermes]"):
 
     clipboard_paste(win, message)
     time.sleep(0.2)
+
+    # SAFETY GATE: re-check foreground before the irrevocable send action.
+    # Between paste completion and now, focus may have changed. If the user
+    # moved to another window, abort — do not fire the message.
+    # Note: we leave the pasted text in the input box; the hermes_prefix check
+    # at the top of send_message clears it on the next invocation.
+    if not _is_foreground(win):
+        return False
 
     btn = find_send_button(win)
     if btn:

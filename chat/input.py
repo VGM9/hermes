@@ -24,10 +24,28 @@ kernel32.GlobalAlloc.restype = ctypes.c_void_p
 user32.GetClipboardData.restype = ctypes.c_void_p
 user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
 
+
+def _is_foreground(win) -> bool:
+    """Return True only if win IS the current foreground window.
+
+    Structural safety gate: never inject keystrokes or focus-steal into a window
+    the user is not currently working in. Called before every destructive
+    operation in this module (click_input, type_keys). If not foreground,
+    callers must abort without sending a single keystroke.
+    """
+    try:
+        fg_handle = user32.GetForegroundWindow()
+        return int(fg_handle) == int(win.handle)
+    except Exception:
+        return False
+
 def wait_for_chat_ready(win, timeout=30):
     """Block until chat Edit is visible+enabled, or timeout expires."""
     end = time.time() + timeout
     while time.time() < end:
+        if not _is_foreground(win):
+            time.sleep(0.5)
+            continue
         try:
             for edit in win.descendants(control_type="Edit"):
                 name = (edit.element_info.name or "").lower()
@@ -63,6 +81,8 @@ def clear_input(win):
             name = (edit.element_info.name or "").lower()
             cls = edit.element_info.class_name or ""
             if "chat input" in name or cls == "native-edit-context":
+                if not _is_foreground(win):
+                    return  # wrong window in focus — do not touch
                 edit.click_input()
                 time.sleep(0.05)
                 win.type_keys("^a{DEL}")
@@ -103,6 +123,8 @@ def clipboard_paste(win, message):
     saved = _clip_read()
     try:
         _clip_write(message)
+        if not _is_foreground(win):
+            return  # wrong window — clipboard prepared but do not paste
         win.type_keys("^v")
         time.sleep(0.1)
     finally:
