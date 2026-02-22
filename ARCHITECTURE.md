@@ -190,7 +190,8 @@ These files are not imported by any live code. They exist for archaeology only.
 
 **What was correct in the design:** File-drop IPC is a cleaner IPC mechanism than pywinauto for steady-state message delivery IF a stable chat-injection API existed. That API does not exist as of VS Code Insiders (2026-02-22). If `vscode.chat.sendMessage(sessionId, message)` ever ships, the approach is worth revisiting.
 
-**Excision commit:** `VGM9@{commit}` "chore: excise hermes-vscode-extension — never deployed, no routing API"
+**Excision commit:** `VGM9@dca99a6` "chore: excise hermes-vscode-extension — never deployed, no routing API"  
+**Artifact cleanup:** `VGM9@0d10e3d` "chore: remove extension artifacts" (.sentinel/ + hermes-inbox/)
 
 ---
 
