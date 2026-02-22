@@ -683,6 +683,14 @@ def poll_once(state, config, config_path):
 
 def run_daemon(config_path):
     """Main daemon loop. Runs until SIGTERM/SIGINT."""
+    # Unconditionally redirect stdout/stderr to the log file.
+    # This ensures the daemon never leaks output into a terminal even if it was
+    # accidentally launched without --detach (e.g. via nohup or run_in_terminal).
+    log_path = SCRIPT_DIR / "hermes_daemon.log"
+    log_fh = open(log_path, "a", encoding="utf-8", buffering=1)  # line-buffered
+    sys.stdout = log_fh
+    sys.stderr = log_fh
+
     safe_print(f"[hermes] Daemon started (PID {os.getpid()})")
     safe_print(f"[hermes] Config: {config_path}")
 
@@ -692,6 +700,11 @@ def run_daemon(config_path):
     def _shutdown(sig, frame):
         safe_print("[hermes] Shutting down")
         clear_pid()
+        try:
+            log_fh.flush()
+            log_fh.close()
+        except Exception:
+            pass
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown)
