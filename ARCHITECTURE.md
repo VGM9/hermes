@@ -1,7 +1,7 @@
 # hermes — Architecture (live code map)
 
-**Last updated:** 2026-02-20 by POLARIS3/0.0.40  
-**Status:** chat/ module split complete. All hermes#10-16 closed. Two open: hermes#5 (UIA probe), hermes#7 (per-target wake).
+**Last updated:** 2026-02-22 by POLARIS1/0.1.8  
+**Status:** pywinauto delivery path is the sole, working implementation. VS Code extension approach evaluated and archived (see Rejected Approaches below).
 
 ---
 
@@ -165,6 +165,32 @@ subprocess.run([sys.executable, send_script, "--config", config_path, "--message
 - Superseded by the `core/` module split
 
 These files are not imported by any live code. They exist for archaeology only.
+
+---
+
+## Rejected Approaches
+
+### VS Code extension for message injection (`monorepos/hermes-vscode-extension/`)
+
+**Status:** Removed 2026-02-22. Was never functional.
+
+**Origin:** POLARIS3/0.0.35 (2026-02-20). Created alongside `agent-ops/cli/` in one commit. Described as "sends messages to Copilot agents without focus stealing."
+
+**The idea:** A VS Code extension watching `_/.vscode/hermes-inbox/*.msg` files. Python side writes the file; extension calls `workbench.action.chat.open` to inject without pywinauto. Designed to avoid focus stealing.
+
+**Why it was never wired up and was removed:**
+
+1. **Routing API does not exist.** `workbench.action.chat.open` targets `widgetService.lastFocusedWidget` — confirmed from `vscode-src/chatActions.ts`. There is no VS Code extension API to deliver a message to a specific chat session by ID. The extension parsed a `sessionId` from the wire format but had nowhere to use it.
+
+2. **Nothing ever wrote to the inbox.** No code in the Python side (`hermes_daemon.py`, `send_message.py`, `wake.py`) ever wrote `.msg` files. The test script (`test-hermes.sh`) hardcoded a defunct THEIA workspace path and was never run from CI or from hermes itself.
+
+3. **The extension was not installed.** `code-insiders --list-extensions | grep hermes` returned nothing. It existed only in the source tree, never deployed.
+
+4. **The pywinauto path already works.** Session-anchored window targeting via UIA `"Set Agent (Ctrl+.) - AGENTNAME"` button detection is documented, confirmed, and in production use. The extension solved a problem that was already solved.
+
+**What was correct in the design:** File-drop IPC is a cleaner IPC mechanism than pywinauto for steady-state message delivery IF a stable chat-injection API existed. That API does not exist as of VS Code Insiders (2026-02-22). If `vscode.chat.sendMessage(sessionId, message)` ever ships, the approach is worth revisiting.
+
+**Excision commit:** `VGM9@{commit}` "chore: excise hermes-vscode-extension — never deployed, no routing API"
 
 ---
 
