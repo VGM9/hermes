@@ -128,9 +128,15 @@ def find_target_window(session_jsonl: str, expected_agent_mode: str):
         if len(candidates) == 1:
             return candidates[0]
         if len(candidates) > 1:
-            # Multiple matches: parent-path disambiguation not yet implemented.
-            # Return first — better than nothing.
-            return candidates[0]
+            # Multiple windows match session + agent mode: cannot determine correct target.
+            # Returning None is correct: delivering to the wrong window is worse than
+            # not delivering. Parent-path disambiguation is not yet implemented (hermes#35).
+            print(
+                f"[hermes:window_detection] {len(candidates)} windows match "
+                f"agent_mode={expected_agent_mode!r} — cannot route, returning None",
+                flush=True
+            )
+            return None
 
         # No window currently shows the expected agent mode.
         # DO NOT attempt to switch sessions here — this function is called from
