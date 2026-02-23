@@ -529,6 +529,24 @@ def _attempt_respawn(state: "DaemonState", target: dict, config_path: str) -> No
         safe_print(f"[hermes] respawn ⚠ config patch failed: {exc}")
 
 
+def _get_system_idle_seconds() -> float:
+    """Return seconds since last keyboard or mouse input (system-wide).
+
+    Uses GetLastInputInfo Win32 API. Returns float('inf') on failure so
+    callers fail-open (assume idle) rather than suppressing pulses on error.
+    """
+    try:
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        lii = LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+        ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
+        elapsed_ms = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+        return max(0.0, elapsed_ms / 1000.0)
+    except Exception:
+        return float('inf')
+
+
 def trigger_autopulse(state, config, config_path: str = ""):
     """Send periodic pulse messages to keep agents alive when user is idle.
 
@@ -552,6 +570,12 @@ def trigger_autopulse(state, config, config_path: str = ""):
 
     hermes_prefix = autopulse.get("hermes_prefix", "[hermes]")
     idle_threshold = float(autopulse.get("user_idle_threshold_seconds", 120))
+    # System-level input gate: if the user touched keyboard/mouse recently,
+    # they are present regardless of JSONL state. Do not pulse.
+    system_idle_grace = float(autopulse.get("system_idle_grace_seconds", 30))
+    system_idle = _get_system_idle_seconds()
+    if system_idle < system_idle_grace:
+        return False  # user is at the keyboard right now
     now = time.time()
 
     # Build target list: multi-target (targets list) or single-target (legacy fields)
