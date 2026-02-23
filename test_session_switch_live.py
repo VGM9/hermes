@@ -17,7 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-JSONL_POLARIS4 = r"C:\Users\victorb\AppData\Roaming\Code - Insiders\User\workspaceStorage\27d15dd3fe03c43d42ef4aafc54a2c26\chatSessions\634638ae-2e0b-4ef0-b221-f1cf344185b1.jsonl"
+if len(sys.argv) < 2:
+    print("Usage: python3 test_session_switch_live.py <path/to/source_session.jsonl>", file=sys.stderr)
+    sys.exit(1)
+JSONL_POLARIS4 = sys.argv[1]
 
 # ── 1. Extract customTitle from JSONL ────────────────────────────────────────
 from core.ui_automation.session_switcher import get_session_custom_title
@@ -116,10 +119,10 @@ win = windows[0]
 mode_before = find_agent_mode_in_window(win)
 print(f"[4] mode before switch: {mode_before!r}")
 
-# ── 4. Pick a DIFFERENT session to switch to (use POLARIS1's session) ─────────
-JSONL_POLARIS1 = r"C:\Users\victorb\AppData\Roaming\Code - Insiders\User\workspaceStorage\27d15dd3fe03c43d42ef4aafc54a2c26\chatSessions\62b28c3c-d4c3-4fa5-a009-1d6a08e28c2d.jsonl"
-title_p1 = get_session_custom_title(JSONL_POLARIS1)
-print(f"[5] POLARIS1 session title: {title_p1!r}")
+# ── 4. Pick a DIFFERENT session to switch to (auto-discover from chatSessions dir) ─────────
+JSONL_POLARIS1 = None  # hardcoded UUID removed (qopilot#19)
+title_p1 = get_session_custom_title(JSONL_POLARIS1) if JSONL_POLARIS1 else None
+print(f"[5] alternate session title (from discovery): {title_p1!r}")
 
 # Find a valid target session: any other JSONL in the same chatSessions dir with a real title
 chat_sessions_dir = Path(JSONL_POLARIS4).parent

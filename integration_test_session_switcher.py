@@ -35,7 +35,10 @@ SESSIONS_DIR = Path(
     r"C:\Users\victorb\AppData\Roaming\Code - Insiders\User\workspaceStorage"
 ) / WORKSPACE_HASH / "chatSessions"
 
-CURRENT_SESSION = "634638ae-2e0b-4ef0-b221-f1cf344185b1"
+if len(sys.argv) < 2:
+    print("Usage: python3 integration_test_session_switcher.py <path/to/current_session.jsonl>", file=sys.stderr)
+    sys.exit(1)
+CURRENT_SESSION = Path(sys.argv[1]).stem  # derive UUID from JSONL filename
 
 
 def get_all_sessions_with_titles() -> list[tuple[str, str | None]]:

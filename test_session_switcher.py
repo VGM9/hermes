@@ -16,8 +16,10 @@ sys.path.insert(0, HERMES_DEV)
 
 from core.ui_automation.session_switcher import get_session_custom_title
 
-# Known session JSONL — active POLARIS4 session
-TEST_JSONL = r"C:\Users\victorb\AppData\Roaming\Code - Insiders\User\workspaceStorage\27d15dd3fe03c43d42ef4aafc54a2c26\chatSessions\634638ae-2e0b-4ef0-b221-f1cf344185b1.jsonl"
+if len(sys.argv) < 2:
+    print("Usage: python3 test_session_switcher.py <path/to/session.jsonl>", file=sys.stderr)
+    sys.exit(1)
+TEST_JSONL = sys.argv[1]
 
 
 def test_get_session_custom_title():
