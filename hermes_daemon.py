@@ -777,8 +777,9 @@ def main():
         return
 
     # Default / --ensure-running: if already alive, exit idempotently.
-    # Backgrounding is the caller's job (VS Code task, run_in_terminal isBackground=true).
-    if alive:
+    # Exception: if the PID in the file is our OWN pid, we are the daemon that
+    # was pre-registered by a --detach parent — proceed to run_daemon().
+    if alive and pid != os.getpid():
         safe_print(f"[hermes] Already running (PID {pid}) — exiting")
         return
 
@@ -795,7 +796,10 @@ def main():
                 stderr=log_f,
                 stdin=subprocess.DEVNULL,
             )
-        safe_print(f"[hermes] Detached daemon PID {child.pid} (child will self-register)")
+        # Write child PID immediately so daemon:status works before child
+        # registers itself. Child will overwrite with the same value on start.
+        PID_FILE.write_text(str(child.pid))
+        safe_print(f"[hermes] Detached daemon PID {child.pid}")
         return
 
     write_pid()
