@@ -8,7 +8,7 @@ Provides functions for sending messages via the chat interface.
 
 import ctypes
 import time
-from .input import read_content, clear_input, clipboard_paste, find_send_button, _is_foreground
+from .input import read_content, clear_input, clipboard_paste, find_send_button, _is_foreground, _has_input_focus
 
 
 def _get_system_idle_seconds() -> float:
@@ -59,6 +59,17 @@ def send_message(win, message, hermes_prefix="[hermes]"):
     # dispatch and execution. This inner gate closes it.
     if _get_system_idle_seconds() < _MIN_SYSTEM_IDLE_SECONDS:
         return False  # user is present — do not steal focus
+
+    # INPUT FOCUS GATE (hermes#41 Option 3): check whether the user currently
+    # has keyboard focus in the chat input box. This catches the 'paused
+    # mid-composition' case that the idle gate misses: if the user typed
+    # something, paused for >_MIN_SYSTEM_IDLE_SECONDS, and is still composing
+    # (cursor in the input box), the idle gate would pass but this gate aborts.
+    #
+    # _has_input_focus uses UIA HasKeyboardFocus property read — no focus steal.
+    # Fails-open (returns False) on UIA errors, so suppression is never false.
+    if _has_input_focus(win):
+        return False  # user has cursor in chat input — they are composing
 
     # Acquire focus explicitly. Never wait for the user to bring the window
     # to foreground — that would fire on the user at the worst moment.

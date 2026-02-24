@@ -159,3 +159,36 @@ def find_send_button(win):
         if name in {"send", "send message", "submit"}:
             return btn
     return None
+
+
+# UIA property ID for HasKeyboardFocus — stable across Windows 7+.
+# Source: UI Automation Client Interfaces (MSDN), UIA_HasKeyboardFocusPropertyId.
+_UIA_HasKeyboardFocusPropertyId = 30020
+
+
+def _has_input_focus(win) -> bool:
+    """Return True if the chat input Edit control currently has keyboard focus.
+
+    This detects the 'user is mid-composition' state without stealing or
+    affecting focus in any way. Uses UIA HasKeyboardFocus property query,
+    which is a read-only observation.
+
+    Called by send_message before set_focus() to close the gap where a user
+    pauses mid-composition for >idle_threshold seconds (the system idle gate
+    would pass, but the user is still composing).
+
+    Returns False on any exception — fail-open (assume not composing) to
+    avoid suppressing valid deliveries when UIA enumeration fails.
+    """
+    try:
+        for edit in win.descendants(control_type="Edit"):
+            name = (edit.element_info.name or "").lower()
+            cls = edit.element_info.class_name or ""
+            if "chat input" in name or cls == "native-edit-context":
+                raw = edit.element_info.element.GetCurrentPropertyValue(
+                    _UIA_HasKeyboardFocusPropertyId
+                )
+                return bool(raw)
+    except Exception:
+        pass
+    return False
