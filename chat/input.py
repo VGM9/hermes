@@ -40,12 +40,29 @@ def _is_foreground(win) -> bool:
         return False
 
 def wait_for_chat_ready(win, timeout=30):
-    """Block until chat Edit is visible+enabled, or timeout expires."""
+    """Acquire focus on win, then wait until chat Edit is visible+enabled.
+
+    Calls win.set_focus() to bring the window to foreground rather than
+    waiting for the user to do so. Waiting for the user to bring the window
+    to foreground and then injecting is a safety violation: it fires exactly
+    when the user is actively using the target window.
+
+    Returns the Edit control when ready, or None on timeout.
+    """
+    # Acquire focus once at the start. If set_focus fails, bail — we cannot
+    # safely interact with a window we cannot bring to foreground.
+    try:
+        win.set_focus()
+    except Exception:
+        return None
+    time.sleep(0.2)
+
     end = time.time() + timeout
     while time.time() < end:
+        # Safety: if focus was stolen away (user clicked elsewhere), abort.
+        # Do NOT re-steal focus in a loop — that would be harassing the user.
         if not _is_foreground(win):
-            time.sleep(0.5)
-            continue
+            return None  # user took focus back — abort entire wake
         try:
             for edit in win.descendants(control_type="Edit"):
                 name = (edit.element_info.name or "").lower()
