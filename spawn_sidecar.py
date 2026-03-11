@@ -28,15 +28,47 @@ Exit codes:
 """
 
 import argparse
+import ctypes
 import sys
 import time
 from pathlib import Path
+from typing import Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from pywinauto import Desktop
 from core.ui_automation.window_detection import find_agent_mode_in_window, VSCODE_WINDOW_CLASS_NAME, is_foreground
+from chat.input import read_content
 from chat.send import send_message
+
+# Minimum system idle required before spawn_sidecar may steal focus.
+# Higher than send_message's 10s because agent-mode switching is more disruptive.
+_MIN_SPAWN_IDLE_SECONDS = 60.0
+
+_HERMES_PREFIX = "[hermes]"
+
+
+def _get_system_idle_seconds() -> float:
+    """Return seconds since last keyboard or mouse input (system-wide)."""
+    try:
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        lii = LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+        ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
+        elapsed_ms = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+        return max(0.0, elapsed_ms / 1000.0)
+    except Exception:
+        return float('inf')  # fail-open: assume idle
+
+
+def _restore_foreground(handle: int) -> None:
+    """Attempt to return focus to the previously-foreground window."""
+    try:
+        if handle:
+            ctypes.windll.user32.SetForegroundWindow(handle)
+    except Exception:
+        pass
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -61,6 +93,12 @@ def _find_spawn_target(target_mode: str, workspace_hint: str = "") -> object:
     no_mode_candidates = []
     other_mode_candidates = []
 
+    # Never target the window the user is actively using.
+    try:
+        fg_handle = int(ctypes.windll.user32.GetForegroundWindow())
+    except Exception:
+        fg_handle = 0
+
     for win in desktop.windows():
         try:
             if win.class_name() != VSCODE_WINDOW_CLASS_NAME:
@@ -71,6 +109,9 @@ def _find_spawn_target(target_mode: str, workspace_hint: str = "") -> object:
             if "visual studio code" not in title.lower():
                 continue
             if workspace_hint and workspace_hint.lower() not in title.lower():
+                continue
+            # CRITICAL: never touch the window the user is actively working in.
+            if fg_handle and int(win.handle) == fg_handle:
                 continue
             current_mode = find_agent_mode_in_window(win)
             if current_mode and current_mode.lower() == target_mode.lower():
@@ -93,8 +134,13 @@ def _find_spawn_target(target_mode: str, workspace_hint: str = "") -> object:
 def _click_set_agent_button(win) -> bool:
     """Click the 'Set Agent (Ctrl+.) - ...' button to open the agent picker.
 
+    Requires win to already be the foreground window. Never calls set_focus();
+    focus must be acquired by the caller before this is called.
+
     Returns True if the button was found and clicked, False otherwise.
     """
+    if not is_foreground(win):
+        return False
     try:
         for btn in win.descendants(control_type="Button"):
             name = (btn.element_info.name or "").strip()
@@ -106,62 +152,121 @@ def _click_set_agent_button(win) -> bool:
     return False
 
 
-def _switch_agent_mode(win, target_mode: str, timeout: float = 5.0) -> bool:
-    """Click the Set Agent button, type the mode name, press Enter, verify.
+def _switch_agent_mode(win, target_mode: str,
+                       saved_fg_handle: int = 0,
+                       timeout: float = 5.0) -> bool:
+    """Bring win to foreground, click Set Agent button, select target mode, verify.
 
-    SAFETY: Verifies win is the foreground window before any keystroke injection.
-    Returns False immediately (no keys sent) if another window is in front.
+    SAFETY MODEL:
+      1. System idle gate must be checked by caller before invoking this function.
+      2. We bring win to foreground explicitly (not waiting for user to do so).
+      3. After set_focus(), if focus was lost (user typed), abort immediately.
+      4. Capture the mode BEFORE switching so we can detect and report wrong selection.
+      5. After ENTER, verify the result; if the wrong agent was selected, ESC + restore.
+      6. On any abort, restore focus to saved_fg_handle.
+
+    Returns True iff the switch was confirmed successful.
     """
-    # SAFETY GATE: verify we own the foreground before click_input steals focus
-    # into an already-active window. If the user is typing in this window, bail.
+    # Capture current mode before we touch anything (rollback reference)
+    mode_before = find_agent_mode_in_window(win)
+
+    # Bring window to foreground
+    try:
+        win.set_focus()
+    except Exception:
+        return False
+    time.sleep(0.15)
+
+    # Gate: did we actually get focus?
     if not is_foreground(win):
+        _restore_foreground(saved_fg_handle)
         return False
 
+    # Click the Set Agent button (opens the picker dropdown)
     if not _click_set_agent_button(win):
+        _restore_foreground(saved_fg_handle)
         return False
 
-    # Give the picker time to open
+    # Wait for picker to open
     time.sleep(0.4)
 
-    # SAFETY GATE: check we still own foreground before typing
+    # Gate: still foreground? User may have clicked away.
     if not is_foreground(win):
-        # Picker may be open — close it without typing
+        # Picker is open in an orphaned state — close it
         try:
             win.type_keys("{ESCAPE}")
         except Exception:
             pass
+        _restore_foreground(saved_fg_handle)
         return False
 
-    # Type the agent name to filter the list
+    # Type the agent name to filter the picker list
     try:
         win.type_keys(target_mode, with_spaces=True)
     except Exception:
+        try:
+            win.type_keys("{ESCAPE}")
+        except Exception:
+            pass
+        _restore_foreground(saved_fg_handle)
         return False
 
     time.sleep(0.3)
 
-    # SAFETY GATE: check foreground before sending Enter
+    # Gate: still foreground before the irrevocable ENTER?
     if not is_foreground(win):
         try:
             win.type_keys("{ESCAPE}")
         except Exception:
             pass
+        _restore_foreground(saved_fg_handle)
         return False
 
     # Press Enter to confirm selection
     try:
         win.type_keys("{ENTER}")
     except Exception:
+        _restore_foreground(saved_fg_handle)
         return False
 
-    # Poll until mode switch is confirmed
+    # Poll until mode switch is confirmed, with rollback on wrong selection
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(0.5)
         current = find_agent_mode_in_window(win)
-        if current and current.lower() == target_mode.lower():
+        if current is None:
+            continue  # still transitioning
+        if current.lower() == target_mode.lower():
+            # Success — restore focus to whoever had it before
+            _restore_foreground(saved_fg_handle)
             return True
+        # Wrong agent selected (default fell through, or wrong picker item).
+        # Do NOT leave the window in an unexpected state. Restore mode_before
+        # by clicking Set Agent again and selecting it, or just ESC.
+        # Best-effort: open picker again, type original mode, confirm.
+        if mode_before and current.lower() != mode_before.lower():
+            print(
+                f"[spawn_sidecar] ROLLBACK: selected '{current}' but wanted '{target_mode}' "
+                f"— restoring to '{mode_before}'",
+                file=sys.stderr
+            )
+            try:
+                win.set_focus()
+                time.sleep(0.1)
+                if is_foreground(win):
+                    _click_set_agent_button(win)
+                    time.sleep(0.4)
+                    if is_foreground(win):
+                        win.type_keys(mode_before, with_spaces=True)
+                        time.sleep(0.3)
+                        if is_foreground(win):
+                            win.type_keys("{ENTER}")
+            except Exception:
+                pass
+        _restore_foreground(saved_fg_handle)
+        return False
 
+    _restore_foreground(saved_fg_handle)
     return False
 
 
@@ -199,9 +304,26 @@ def main():
         print("[spawn_sidecar] Dry run — no changes made.")
         sys.exit(0)
 
+    # SYSTEM IDLE GATE: do not steal focus if user is active.
+    # spawn_sidecar requires 60s idle (more disruptive than a pulse).
+    idle = _get_system_idle_seconds()
+    if idle < _MIN_SPAWN_IDLE_SECONDS:
+        print(
+            f"[spawn_sidecar] ABORTED: system idle {idle:.1f}s < {_MIN_SPAWN_IDLE_SECONDS}s required.",
+            file=sys.stderr
+        )
+        print("[spawn_sidecar] User is present. Spawn deferred.", file=sys.stderr)
+        sys.exit(1)
+
+    # Capture the current foreground handle so we can restore it afterward.
+    try:
+        saved_fg_handle = int(ctypes.windll.user32.GetForegroundWindow())
+    except Exception:
+        saved_fg_handle = 0
+
     # Step 2–5: Switch to target agent mode
     print(f"[spawn_sidecar] Clicking Set Agent button and selecting '{target_mode}'...")
-    if not _switch_agent_mode(win, target_mode):
+    if not _switch_agent_mode(win, target_mode, saved_fg_handle=saved_fg_handle):
         print(f"[spawn_sidecar] ERROR: mode switch to '{target_mode}' failed or timed out.", file=sys.stderr)
         print("[spawn_sidecar] Window may not have this agent mode installed, or picker didn't open.", file=sys.stderr)
         sys.exit(2)
