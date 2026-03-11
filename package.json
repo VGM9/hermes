@@ -13,6 +13,8 @@
     "daemon:status":  "python3 ./hermes_daemon.py --status",
     "wake":           "python3 ./hermes_wake.py",
     "spawn:sidecar":  "python3 ./spawn_sidecar.py",
+    "test":            "python3 -m pytest tests/ -m 'not requires_vscode' -v",
+    "test:full":       "python3 -m pytest tests/ -v",
     "deploy-tasks":   "node ./install-tasks.js",
     "postinstall":    "node ./install-tasks.js",
     "reload:phase2":  "python3 ./reload_and_wake.py --phases 2",

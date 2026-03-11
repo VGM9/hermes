@@ -280,8 +280,10 @@ def main():
                         help="Target agent mode name (e.g. POLARIS1)")
     parser.add_argument("--mandate", required=True,
                         help="Initial mandate message to deliver after mode switch")
-    parser.add_argument("--workspace", default="",
-                        help="Window title substring to constrain search (optional)")
+    parser.add_argument("--workspace", required=True,
+                        help="Window title substring to constrain window search. REQUIRED — prevents "
+                             "cross-workspace injection. Omitting this caused the 2026-03-11 GHORGS "
+                             "incident (VGM9/hermes#46) where a mandate landed in the wrong window.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Find window but do not switch mode or deliver mandate")
     args = parser.parse_args()

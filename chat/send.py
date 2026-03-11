@@ -90,14 +90,14 @@ def send_message(win, message, hermes_prefix="[hermes]"):
         else:
             return None  # suppressed: user content present, not a failure
 
-    clipboard_paste(win, message)
+    clipboard_paste(win, f"{hermes_prefix} {message}")
     time.sleep(0.2)
 
     # SAFETY GATE: re-check foreground before the irrevocable send action.
     # Between paste completion and now, focus may have changed. If the user
     # moved to another window, abort — do not fire the message.
-    # Note: we leave the pasted text in the input box; the hermes_prefix check
-    # at the top of send_message clears it on the next invocation.
+    # The pasted text starts with hermes_prefix, so the cleanup branch at
+    # the top of send_message will fire and clear it on the next invocation.
     if not _is_foreground(win):
         return False
 
