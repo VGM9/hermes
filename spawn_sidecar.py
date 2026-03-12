@@ -37,7 +37,7 @@ from typing import Optional, Tuple
 sys.path.insert(0, str(Path(__file__).parent))
 
 from pywinauto import Desktop
-from core.ui_automation.window_detection import find_agent_mode_in_window, VSCODE_WINDOW_CLASS_NAME, is_foreground
+from core.ui_automation.window_detection import find_agent_mode_in_window, find_target_window, VSCODE_WINDOW_CLASS_NAME, is_foreground
 from chat.input import read_content
 from chat.send import send_message
 
@@ -280,23 +280,42 @@ def main():
                         help="Target agent mode name (e.g. POLARIS1)")
     parser.add_argument("--mandate", required=True,
                         help="Initial mandate message to deliver after mode switch")
-    parser.add_argument("--workspace", required=True,
-                        help="Window title substring to constrain window search. REQUIRED — prevents "
-                             "cross-workspace injection. Omitting this caused the 2026-03-11 GHORGS "
-                             "incident (VGM9/hermes#46) where a mandate landed in the wrong window.")
+    parser.add_argument("--workspace", required=False, default="",
+                        help="Window title substring to constrain window search (legacy fallback). "
+                             "Use --session-jsonl instead for session-anchored targeting.")
+    parser.add_argument("--session-jsonl", dest="session_jsonl", default="",
+                        help="Path to the target agent's session JSONL file. Enables session-anchored "
+                             "window targeting via find_target_window() (hermes#47). Preferred over "
+                             "--workspace because it uniquely identifies the correct VS Code window "
+                             "regardless of title substring collisions.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Find window but do not switch mode or deliver mandate")
     args = parser.parse_args()
+
+    if not args.session_jsonl and not args.workspace:
+        print("[spawn_sidecar] ERROR: one of --session-jsonl or --workspace must be provided", file=sys.stderr)
+        sys.exit(1)
 
     target_mode = args.agent.strip()
     mandate = args.mandate.strip()
 
     # Step 1: Find a suitable window
-    win = _find_spawn_target(target_mode, workspace_hint=args.workspace)
-    if win is None:
-        print(f"[spawn_sidecar] ERROR: no suitable window found for agent '{target_mode}'", file=sys.stderr)
-        print("[spawn_sidecar] All VS Code windows may already have this agent mode, or none exist.", file=sys.stderr)
-        sys.exit(1)
+    # Prefer session-anchored targeting (hermes#47) over workspace-hint fallback.
+    if args.session_jsonl:
+        win = find_target_window(args.session_jsonl.strip(), target_mode)
+        if win is None:
+            print(f"[spawn_sidecar] ERROR: find_target_window found no window for session-jsonl='{args.session_jsonl}' agent='{target_mode}'", file=sys.stderr)
+            print("[spawn_sidecar] Verify the session JSONL path is correct and the agent mode is active.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        # Legacy fallback: workspace-hint title search (pre-#47 behaviour).
+        # WARNING: this may target the wrong window if multiple workspaces share
+        # a title substring. Use --session-jsonl for reliable targeting.
+        win = _find_spawn_target(target_mode, workspace_hint=args.workspace)
+        if win is None:
+            print(f"[spawn_sidecar] ERROR: no suitable window found for agent '{target_mode}'", file=sys.stderr)
+            print("[spawn_sidecar] All VS Code windows may already have this agent mode, or none exist.", file=sys.stderr)
+            sys.exit(1)
 
     print(f"[spawn_sidecar] Found spawn target: '{win.window_text()}'")
     current_mode = find_agent_mode_in_window(win) or "(none)"
