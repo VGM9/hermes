@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: AO_MGMT Dashboard
+    url: http://127.0.0.1:3847
+    about: View project management dashboard (local only)
