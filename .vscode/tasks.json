@@ -1,0 +1,24 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "hermes: test v1",
+      "type": "shell",
+      "command": "npm run test:v1",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "hermes: dry-run one wake",
+      "type": "shell",
+      "command": "npm run hermes:v1 -- --interval 1 --message \"continue the quest\" --dry-run --max-wakes 1",
+      "problemMatcher": []
+    },
+    {
+      "label": "hermes: queue one wake",
+      "type": "shell",
+      "command": "npm run hermes:v1 -- --interval 1 --message \"continue the quest\" --queue-file .hermes-wake-intents.jsonl --max-wakes 1",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,6 +1,56 @@
-# HERMES - Agent Approval Automation
+# HERMES - Human-Safe Agent Orchestration
 
-**Detect and manage VSCode chat agent approval requests programmatically.**
+**Stimulate the right VS Code agent at the right time without interrupting the human using the machine.**
+
+Hermes 1.0 begins with a small, deterministic wake loop. It accepts an interval
+and a message, emits at most one wake request per due poll, and leaves delivery
+to an explicitly injected transport. The scheduler itself does not inspect
+windows, move focus, open terminals, or simulate typing.
+
+The existing approval and UI automation code is retained as 0.0.x reference
+material while the 1.0 implementation earns each platform adapter through
+focused tests.
+
+Run the first 1.0 core validation with:
+
+```bash
+npm run test:v1
+```
+
+The executable 1.0 loop accepts only an interval and a wake message. Until a
+platform adapter proves non-focus delivery to an existing chat, use its dry
+run boundary:
+
+```bash
+npm run hermes:v1 -- --interval 300 --message "continue the quest" --dry-run
+```
+
+Add `--max-wakes 1` for a bounded smoke test. Without `--dry-run`, the command
+refuses to start rather than falling back to the legacy focus-stealing UI
+automation.
+
+For a durable, non-invasive handoff to a future trusted relay, use
+`--queue-file path/to/wake-intents.jsonl` instead of `--dry-run`. Queueing is
+not chat delivery; it only records the intent.
+
+The demonstrated live path is available only as an explicit opt-in:
+
+```bash
+python -m hermes_v1.cli --interval 300 \\
+  --message "continue the quest" \\
+  --legacy-live \\
+  --session-jsonl "C:/path/to/chat-session.jsonl" \\
+  --agent-mode "Default Tool Use"
+```
+
+This uses the legacy focus-based sender and is not the unattended-safe
+transport. It must remain opt-in until a non-focus relay is proven.
+
+The project task `hermes: dry-run one wake` runs the bounded smoke test through
+the VS Code task boundary.
+
+The project task `hermes: queue one wake` exercises the durable intent handoff
+through the same boundary.
 
 [![Code Quality](https://img.shields.io/badge/code%20quality-9.5%2F10-success)]()
 [![Pure Functions](https://img.shields.io/badge/pure%20functions-100%25-blue)]()

@@ -2,6 +2,56 @@
 
 **Priority reading for AI agents working with this codebase.**
 
+## Hermes 1.x Development Rules
+
+The `feature/hermes-1.0-loop-core` branch is the active 1.x development line.
+Do not commit 1.x work directly to `main`. The 0.0.x approval, daemon, and UI
+automation modules remain reference material until a 1.x replacement is
+independently validated.
+
+### Product Boundary
+
+Hermes stimulates the right existing VS Code agent at the right time with the
+right message while getting out of the human's way. The initial 1.x contract is
+only an interval plus a message, followed by a bounded wake attempt. Keep the
+scheduler, target identity, safety policy, and platform delivery separate.
+
+### Human-Safety Requirements
+
+1. Never activate or foreground a window to deliver a wake.
+2. Never type into the user's foreground window or shared keyboard focus.
+3. Never open a visible terminal as part of normal background operation.
+4. Refuse delivery when the target is ambiguous, unverified, foreground-owned,
+   or marked as receiving human input.
+5. Do not claim ambient behavior unless it works while the user is actively
+   using VS Code.
+
+Platform adapters must fail closed when they cannot prove the target and the
+delivery channel are safe. A skipped wake is preferable to a wrong-window
+message or stolen focus.
+
+### Shell and Task Portability
+
+Every executable script and validation command must run in PowerShell, Git Bash,
+and a VS Code task terminal. Prefer `python` over `python3` on Windows and use
+relative repository paths in task arguments. Validate task execution separately
+from direct shell execution. Do not use `node -e`, heredoc programs, or other
+inline application code; create a real script or test file instead.
+
+### Validation Gate
+
+Before committing 1.x work:
+
+```text
+npm run test:v1
+python -m pytest tests/ -m "not requires_vscode" -q
+git -c core.whitespace=cr-at-eol diff --check
+```
+
+Tests must cover the pure decision boundary before any live Windows UI test is
+added. Live UI tests must be opt-in and must never run as part of the default
+test command.
+
 ## Quick Start Guide  
 
 **If you are:**
